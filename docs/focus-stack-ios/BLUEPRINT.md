@@ -73,6 +73,9 @@ third-party license text ships in an in-app "Acknowledgements" screen.
   (`setExposureModeCustom(duration:ISO:)`) are available on all modern iPhones.
 - **RAW/DNG** capture where the device supports it (`AVCapturePhotoOutput.availableRawPhotoPixelFormatTypes`),
   falling back to full-res HEIF/JPEG.
+- **Capture assumptions (confirmed):** rig is **tripod/mount-mounted** (subject and phone
+  stationary); outputs are the **8 RAW/DNG frames + final stacked HEIF/JPEG**; frame count is
+  **adjustable, default 8**.
 - **Distance readout caveat:** iOS does *not* expose an absolute focus distance in meters from
   the lens. `lensPosition` is a **relative [0.0 … 1.0]** value that is monotonic with focus
   distance but non-linear. On LiDAR-equipped devices we can *additionally* sample
@@ -226,7 +229,10 @@ region under the reticle:
   of the video-data-output frame — no extra capture cost.
 
 ### 6.5 The 8-frame even-spacing sequencer — `FocusBracketController`
-Default **8 steps** (configurable 3–20), inclusive of both endpoints:
+Default **8 steps** (adjustable 3–20), inclusive of both endpoints. Because the rig is
+**tripod-mounted**, the sequencer auto-fires all frames back-to-back with a short
+settle-delay per step and an optional 2 s start timer to damp any button-press shake — no
+per-frame user interaction:
 
 ```
 for i in 0..<N:
@@ -242,10 +248,13 @@ for i in 0..<N:
 - Emits progress (`3 / 8`) to the UI and can be cancelled.
 
 ### 6.6 Capture & storage — `StackStore`
-- Prefer **RAW (DNG)**; fall back to max-resolution HEIF.
-- Each frame tagged with `{index, lensPosition, ISO, shutter, timestamp, lensID}`.
-- One capture session = one on-disk `StackSet` folder (frames + `manifest.json`) so a stack can
-  be re-processed later without re-shooting.
+- Capture **RAW (DNG)** for the 8 source frames (fall back to max-res HEIF on devices without RAW).
+- Outputs saved: the **8 RAW/DNG source frames** *and* the **final stacked HEIF/JPEG**. The depth
+  map is produced internally to drive the Method-B merge but is not exported by default (toggle
+  available later).
+- Each frame tagged with `{index, lensPosition, ISO, shutter, kelvin, timestamp, lensID}`.
+- One capture session = one on-disk `StackSet` folder (RAW frames + merged result +
+  `manifest.json`) so a stack can be re-processed later without re-shooting.
 
 ### 6.7 Stacking engine bridge — `StackEngine`
 - OpenCV iOS framework + the `focus-stack` C++ core compiled for `arm64`.
@@ -356,7 +365,7 @@ re-stacked with different engine options.
 | No absolute distance except on LiDAR | Show relative scale; distance only where LiDAR exists |
 | Building OpenCV + C++ for arm64 in-app | Pin OpenCV iOS framework; isolate in `.mm` bridge; CI build |
 | GPL contamination | Only MIT/Apache-2.0 ship; Enfuse/Hugin excluded |
-| Handheld micro-motion between frames | Enable ECC alignment; recommend tripod + timer/remote |
+| Frame-to-frame shift (focus breathing on tripod) | ECC alignment stays on to correct macro focus-breathing scale changes even when mounted; 2 s start timer damps button shake |
 | Confirming sharpness on small screen | 3× focus loupe sampling full-res feed with peaking (§6.4a) |
 | App Store: is on-device the only mode? | Yes — no network/cloud stacking in scope |
 
