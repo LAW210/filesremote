@@ -20,13 +20,15 @@ Set your signing team, select your device, run.
 
 ## What works out of the box (once it compiles)
 
-- Lens picker (0.5x / 1x / Tele), manual ISO + shutter, **Kelvin white balance** with light-box
-  presets + tint, one-button lock for the whole stack.
+- Lens picker (0.5x / 1x / Tele), manual ISO + shutter with a **live luminance histogram**,
+  **Kelvin white balance** with light-box presets + tint, one-button lock for the whole stack.
 - Manual focus slider with **focus peaking** (green edge overlay) and the **3× loupe**
-  (pinch 2×–6×) for confirming sharpness.
+  (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness.
 - **Set Near / Set Far** anchors → adjustable-count bracket (default 8, inclusive endpoints)
   with a 2 s start timer, per-step focus settle-wait, and RAW (DNG) capture with HEIF fallback.
 - Frames + `manifest.json` persisted per StackSet; merged result saved beside them.
+- **Library screen** to browse saved StackSets and re-stack without re-shooting, plus an
+  **Acknowledgements screen** for the shipped licenses.
 - A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
   no alignment) so the end-to-end flow works before the C++ engine is wired in.
 
@@ -50,9 +52,11 @@ against the checkout, as noted in the file.
 
 ## Known first-draft gaps
 
-- Not yet compiled — expect minor fixes (imports, API availability) on first Xcode build.
+- Not yet compiled on a Mac — the code has been desk-audited (dependency APIs verified against
+  upstream focus-stack headers; C++ exception handling, connection rotation, and framework
+  imports fixed), but expect the possibility of minor first-build fixes.
 - The RAW DNG frames are stacked via CIImage decode in the fallback engine; the C++ path
   should read the DNGs directly.
-- Loupe drag-to-move is stubbed to center; histogram/EV meter not yet implemented.
-- No Library screen yet (StackStore.loadAll() is ready for it).
-- Depth-map export toggle not yet surfaced in UI.
+- Depth-map export toggle not yet surfaced in UI (the C++ engine already writes one to tmp).
+- The fallback stacker is CPU-bound (~seconds per stack at 2048 px); the embedded engine
+  replaces it for production quality and speed.

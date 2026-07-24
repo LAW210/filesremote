@@ -1,5 +1,5 @@
-import Photos
 import SwiftUI
+import UIKit
 
 @MainActor
 final class CameraViewModel: ObservableObject {
@@ -20,6 +20,7 @@ final class CameraViewModel: ObservableObject {
     @Published var viewfinderImage: UIImage?
     @Published var loupeImage: UIImage?
     @Published var loupeVisible = false
+    @Published var histogram: [Float] = []
     @Published var errorMessage: String?
 
     // Lens
@@ -59,6 +60,7 @@ final class CameraViewModel: ObservableObject {
                 Task { @MainActor in
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
+                    self.histogram = output.histogram
                 }
             }
             camera.start()
@@ -188,18 +190,8 @@ final class CameraViewModel: ObservableObject {
 }
 
 private extension UIImage {
+    /// iOS 17's built-in heicData(), falling back to JPEG for exotic pixel formats.
     func heicOrJPEGData() -> Data? {
-        if let heic = heicData() { return heic }
-        return jpegData(compressionQuality: 0.95)
-    }
-
-    func heicData() -> Data? {
-        guard let cg = cgImage else { return nil }
-        let data = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(data as CFMutableData,
-                                                          "public.heic" as CFString, 1, nil) else { return nil }
-        CGImageDestinationAddImage(dest, cg, nil)
-        guard CGImageDestinationFinalize(dest) else { return nil }
-        return data as Data
+        heicData() ?? jpegData(compressionQuality: 0.95)
     }
 }

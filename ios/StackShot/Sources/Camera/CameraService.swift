@@ -74,6 +74,18 @@ final class CameraService: NSObject {
         videoOutput.alwaysDiscardsLateVideoFrames = true
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
         if session.canAddOutput(videoOutput) { session.addOutput(videoOutput) }
+
+        applyPortraitRotation()
+    }
+
+    /// Buffers arrive landscape by default; rotate both outputs for the portrait-only UI.
+    private func applyPortraitRotation() {
+        for output in [photoOutput as AVCaptureOutput, videoOutput] {
+            if let connection = output.connection(with: .video),
+               connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+        }
     }
 
     private func attach(lens: Lens) throws {
@@ -104,6 +116,7 @@ final class CameraService: NSObject {
                     self.session.beginConfiguration()
                     try self.attach(lens: lens)
                     self.session.commitConfiguration()
+                    self.applyPortraitRotation()
                     cont.resume()
                 } catch {
                     self.session.commitConfiguration()

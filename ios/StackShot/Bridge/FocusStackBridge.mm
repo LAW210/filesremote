@@ -3,9 +3,10 @@
 #if ENGINE_EMBEDDED
 
 // Vendored by scripts/fetch_engine.sh into Vendor/focus-stack/src.
-// NOTE: verify these header names against the vendored checkout — the focus-stack
-// library's public entry point is the FocusStack class (focusstack.hh).
+// API verified against focusstack.hh (namespace focusstack, class FocusStack):
+// set_inputs, set_output, set_depthmap, set_align_flags(ALIGN_DEFAULT), run().
 #import <opencv2/opencv.hpp>
+#include <exception>
 #include "focusstack.hh"
 
 @implementation FocusStackBridge
@@ -13,7 +14,9 @@
 + (nullable UIImage *)stackImagesAtPaths:(NSArray<NSString *> *)paths
                                 progress:(void (^)(NSNumber *))progress
                                    error:(NSString **)error {
-    @try {
+    // C++ try/catch: OpenCV and the stacking core throw C++ exceptions,
+    // which Objective-C @try/@catch would NOT intercept.
+    try {
         std::vector<std::string> inputs;
         inputs.reserve(paths.count);
         for (NSString *p in paths) {
@@ -40,8 +43,11 @@
         UIImage *result = [UIImage imageWithContentsOfFile:outPath];
         if (!result && error) *error = @"could not load merged output";
         return result;
-    } @catch (NSException *ex) {
-        if (error) *error = ex.reason ?: @"unknown exception in stacking core";
+    } catch (const std::exception &e) {
+        if (error) *error = [NSString stringWithUTF8String:e.what()] ?: @"C++ exception";
+        return nil;
+    } catch (...) {
+        if (error) *error = @"unknown exception in stacking core";
         return nil;
     }
 }

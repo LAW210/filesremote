@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 /// Shows the stacked result with a per-frame filmstrip, save/share, and re-stack.
@@ -78,7 +79,10 @@ struct FrameThumbnail: View {
         .frame(width: 60, height: 60)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task {
-            image = await Self.thumbnail(for: url)
+            let loaded = await Task.detached(priority: .utility) {
+                Self.thumbnail(for: url)
+            }.value
+            image = loaded
         }
     }
 

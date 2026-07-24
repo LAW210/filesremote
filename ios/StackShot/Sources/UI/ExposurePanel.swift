@@ -10,6 +10,9 @@ struct ExposurePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            HistogramView(bins: vm.histogram)
+                .frame(height: 40)
+
             row("ISO \(Int(vm.iso))") {
                 Slider(value: $vm.iso, in: 25...1600, step: 25)
             }
@@ -56,5 +59,27 @@ struct ExposurePanel: View {
             Text(label).frame(width: 88, alignment: .leading).monospacedDigit()
             content()
         }
+    }
+}
+
+/// Live luminance histogram (64 bins, shadows left, highlights right).
+struct HistogramView: View {
+    let bins: [Float]
+
+    var body: some View {
+        GeometryReader { geo in
+            let count = max(bins.count, 1)
+            let barWidth = geo.size.width / CGFloat(count)
+            HStack(alignment: .bottom, spacing: 0) {
+                ForEach(bins.indices, id: \.self) { i in
+                    Rectangle()
+                        .fill(.white.opacity(0.85))
+                        .frame(width: barWidth,
+                               height: max(1, CGFloat(bins[i]) * geo.size.height))
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+        .background(.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 4))
     }
 }

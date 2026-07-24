@@ -22,7 +22,7 @@ final class NativeDepthMapStacker: StackEngine {
         var sharpness: [[Float]] = []
         var width = 0, height = 0
 
-        defer { for var buf in rgbaFrames { free(buf.data) } }
+        defer { for buf in rgbaFrames { free(buf.data) } }
 
         for (i, url) in frameURLs.enumerated() {
             guard var ci = CIImage(contentsOf: url) else { throw StackEngineError.decodeFailed(url) }

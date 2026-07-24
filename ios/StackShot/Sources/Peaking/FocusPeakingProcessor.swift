@@ -13,10 +13,12 @@ final class FocusPeakingProcessor {
     struct Output {
         let viewfinder: UIImage
         let loupe: UIImage?
+        /// 64-bin luminance histogram, normalized to 0–1, for the exposure panel.
+        let histogram: [Float]
     }
 
-    /// Normalized loupe center in image coordinates (0–1); nil hides the loupe.
-    var loupeCenter: CGPoint? = CGPoint(x: 0.5, y: 0.5)
+    /// Normalized loupe center in image coordinates (0–1, top-left origin); nil hides the loupe.
+    var loupeCenter: CGPoint?
     var loupeMagnification: CGFloat = 3.0     // default 3x, pinchable 2x–6x
     var peakingEnabled = true
     var peakingThreshold: CGFloat = 0.3
@@ -40,7 +42,8 @@ final class FocusPeakingProcessor {
         if let center = loupeCenter {
             loupe = renderLoupe(from: composited, center: center)
         }
-        return Output(viewfinder: viewfinder, loupe: loupe)
+        return Output(viewfinder: viewfinder, loupe: loupe,
+                      histogram: luminanceHistogram(of: pixelBuffer))
     }
 
     private func applyPeaking(to source: CIImage) -> CIImage {
@@ -55,14 +58,49 @@ final class FocusPeakingProcessor {
                                                          kCIInputContrastKey: 2.0])
         let thresholded = mono.applyingFilter("CIColorThreshold",
                                               parameters: ["inputThreshold": peakingThreshold])
+            .cropped(to: source.extent)
 
-        // Tint surviving edges bright green and composite over the source frame.
+        // White edges → green edges on black, then screen-blend over the source:
+        // black is the identity for screen blending, so only edges light up.
         let tint = CIImage(color: CIColor(red: 0.1, green: 1.0, blue: 0.2))
             .cropped(to: source.extent)
-        let tintedEdges = tint.applyingFilter("CIBlendWithMask",
-                                              parameters: [kCIInputBackgroundImageKey: CIImage.empty(),
-                                                           kCIInputMaskImageKey: thresholded])
-        return tintedEdges.composited(over: source)
+        let greenEdges = thresholded.applyingFilter("CIMultiplyCompositing",
+                                                    parameters: [kCIInputBackgroundImageKey: tint])
+        return greenEdges.applyingFilter("CIScreenBlendMode",
+                                         parameters: [kCIInputBackgroundImageKey: source])
+    }
+
+    /// Cheap CPU histogram from a strided sample of the BGRA buffer (~16k samples/frame).
+    private func luminanceHistogram(of pixelBuffer: CVPixelBuffer, bins: Int = 64) -> [Float] {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return [Float](repeating: 0, count: bins)
+        }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let stride = max(1, width / 128)
+
+        var counts = [Float](repeating: 0, count: bins)
+        var total: Float = 0
+        var row = 0
+        while row < height {
+            let rowPtr = base.advanced(by: row * rowBytes).assumingMemoryBound(to: UInt8.self)
+            var col = 0
+            while col < width {
+                let p = col * 4                      // BGRA
+                let luma = 0.114 * Float(rowPtr[p]) + 0.587 * Float(rowPtr[p + 1])
+                         + 0.299 * Float(rowPtr[p + 2])
+                let bin = min(bins - 1, Int(luma) * bins / 256)
+                counts[bin] += 1
+                total += 1
+                col += stride
+            }
+            row += stride
+        }
+        guard let peak = counts.max(), peak > 0 else { return counts }
+        return counts.map { $0 / peak }
     }
 
     private func renderLoupe(from image: CIImage, center: CGPoint) -> UIImage? {

@@ -11,10 +11,19 @@ struct ViewfinderScreen: View {
 
             // Live feed with peaking baked in by FocusPeakingProcessor.
             if let image = vm.viewfinderImage {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { geo in
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .contentShape(Rectangle())
+                        .onTapGesture(coordinateSpace: .local) { location in
+                            guard vm.loupeVisible else { return }
+                            vm.moveLoupe(to: normalizedPoint(tap: location,
+                                                             in: geo.size,
+                                                             imageSize: image.size))
+                        }
+                }
             } else {
                 ProgressView().tint(.white)
             }
@@ -48,6 +57,18 @@ struct ViewfinderScreen: View {
         }
     }
 
+    /// Maps a tap on the aspect-fit viewfinder to normalized (0–1) image coordinates,
+    /// accounting for letterbox bars.
+    private func normalizedPoint(tap: CGPoint, in viewSize: CGSize, imageSize: CGSize) -> CGPoint {
+        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(x: (viewSize.width - fitted.width) / 2,
+                             y: (viewSize.height - fitted.height) / 2)
+        let x = (tap.x - origin.x) / fitted.width
+        let y = (tap.y - origin.y) / fitted.height
+        return CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+    }
+
     private var topBar: some View {
         HStack {
             // Lens picker chips
@@ -61,6 +82,12 @@ struct ViewfinderScreen: View {
                   systemImage: vm.exposureLocked ? "lock.fill" : "lock.open")
                 .font(.caption)
                 .foregroundStyle(vm.exposureLocked ? .green : .orange)
+            NavigationLink {
+                LibraryScreen()
+            } label: {
+                Image(systemName: "photo.stack")
+            }
+            .tint(.white)
         }
     }
 
@@ -115,6 +142,7 @@ struct LoupeView: View {
     let image: UIImage
     @EnvironmentObject var vm: CameraViewModel
     @State private var magnification: CGFloat = 3
+    @State private var gestureBase: CGFloat = 3
 
     var body: some View {
         VStack(spacing: 4) {
@@ -130,14 +158,14 @@ struct LoupeView: View {
         .gesture(
             MagnificationGesture()
                 .onChanged { value in
-                    magnification = min(max(3 * value, 2), 6)
+                    magnification = min(max(gestureBase * value, 2), 6)
                     vm.setLoupeMagnification(magnification)
                 }
+                .onEnded { _ in gestureBase = magnification }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         .padding(.top, 60)
         .padding(.trailing, 12)
-        .allowsHitTesting(true)
     }
 }
 
