@@ -87,8 +87,8 @@ flowchart TD
     A[Launch · live viewfinder] --> B[Select lens<br/>UW / Wide / Tele]
     B --> C[Manual exposure<br/>ISO + shutter, then LOCK]
     C --> D[Manual focus with peaking<br/>+ lens-position readout]
-    D --> E[Rack to NEAREST point<br/>tap 'Set Near']
-    E --> F[Rack to FARTHEST point<br/>tap 'Set Far']
+    D --> E[Rack to NEAREST point<br/>3x loupe · tap 'Set Near']
+    E --> F[Rack to FARTHEST point<br/>3x loupe · tap 'Set Far']
     F --> G{Preview 8 planned<br/>focus steps}
     G -->|Adjust count/range| F
     G -->|Capture| H[Auto-bracket:<br/>8 locked-exposure frames near→far]
@@ -191,6 +191,20 @@ device.unlockForConfiguration()
   `lensPositionNear`.
 - **Set Far:** user racks to the farthest part; we store `lensPositionFar`.
 - We validate `near ≠ far` and show a live preview of the planned step planes.
+- The 8 frames are captured with **inclusive endpoints**: frame 1 sits exactly on
+  `lensPositionNear` and frame 8 exactly on `lensPositionFar`.
+
+### 6.4a Focus loupe (3× magnifier) — `FocusLoupe`
+Confirming critical focus on a phone screen is hard, so while the user is setting the Near/Far
+anchors (and any time manual focus is active) the app shows a **3× magnified loupe** of the
+region under the reticle:
+- A circular, draggable magnifier that samples the **full-resolution** center of the sensor feed
+  (not just the downscaled preview) so real sharpness is visible, with the **focus-peaking
+  overlay applied inside it**.
+- Default **3×**; pinch to change (2×–6×). Tap-to-move the sampled point, or lock it to screen
+  center.
+- Auto-shows on focus interaction, auto-hides after capture. Implemented as a Metal-sampled crop
+  of the video-data-output frame — no extra capture cost.
 
 ### 6.5 The 8-frame even-spacing sequencer — `FocusBracketController`
 Default **8 steps** (configurable 3–20), inclusive of both endpoints:
@@ -238,14 +252,13 @@ There are two ways to interpolate between `lensPositionNear` and `lensPositionFa
    sampling or a per-device calibration table), we interpolate evenly in `1/distance` so the
    in-focus slabs tile the subject without gaps or wasteful overlap.
 
-**Plan:** ship v1 with **linear-in-lensPosition** (option 1), expose an advanced toggle for
-diopter-even spacing (option 2) once calibration is in. Also expose an **overlap safety factor**
-so adjacent frames' depth-of-field slabs slightly overlap — critical to avoid unsharp bands in
-the final stack.
+**Plan:** ship v1 with **linear-in-lensPosition** (option 1); diopter-even spacing (option 2) is
+**deferred** to M6 behind a toggle once per-device calibration exists. Also expose an **overlap
+safety factor** so adjacent frames' depth-of-field slabs slightly overlap — critical to avoid
+unsharp bands in the final stack.
 
-> Open question for the user: should the near/far anchors be *inclusive endpoints* of the 8
-> frames (frame 1 = near, frame 8 = far), or should the 8 frames sit *between* them? Blueprint
-> assumes **inclusive endpoints**.
+**Endpoints are inclusive (confirmed):** frame 1 = `lensPositionNear`, frame 8 = `lensPositionFar`,
+with the remaining 6 evenly spaced between them.
 
 ---
 
@@ -270,8 +283,8 @@ re-stacked with different engine options.
 1. **Viewfinder** — live feed, peaking overlay, lens picker chips, exposure/focus toggles,
    big shutter button.
 2. **Exposure panel** — ISO + shutter sliders, histogram, EV meter, "Lock" button.
-3. **Focus panel** — focus slider + reticle readout, **Set Near** / **Set Far** buttons, a
-   planned-steps strip showing the 8 focus planes.
+3. **Focus panel** — focus slider + reticle readout, **3× focus loupe** for confirming sharpness,
+   **Set Near** / **Set Far** buttons, a planned-steps strip showing the 8 focus planes.
 4. **Capture progress** — "Frame 3 / 8", cancel.
 5. **Review** — merged result with a **before/after** and per-frame filmstrip, **Re-stack**
    (change method/steps), depth-map view, **Export to Photos / Share**.
@@ -302,7 +315,7 @@ re-stacked with different engine options.
 - **M0 — Skeleton:** Xcode project, camera permission, live viewfinder, lens picker.
 - **M1 — Manual controls:** ISO/shutter/WB lock + histogram; manual focus slider + lens-position
   readout.
-- **M2 — Focus peaking:** Metal/Core Image edge overlay.
+- **M2 — Focus peaking + loupe:** Metal/Core Image edge overlay and the 3× full-res focus loupe.
 - **M3 — Bracket sequencer:** Set Near/Far, 8-step monotonic sweep with settle-wait, locked
   exposure, RAW capture, StackSet storage.
 - **M4 — Engine integration:** OpenCV + focus-stack compiled for arm64, `.mm` bridge, Method-B
@@ -323,7 +336,7 @@ re-stacked with different engine options.
 | Building OpenCV + C++ for arm64 in-app | Pin OpenCV iOS framework; isolate in `.mm` bridge; CI build |
 | GPL contamination | Only MIT/Apache-2.0 ship; Enfuse/Hugin excluded |
 | Handheld micro-motion between frames | Enable ECC alignment; recommend tripod + timer/remote |
-| Endpoint semantics (inclusive vs between) | Confirm with user — assumed inclusive |
+| Confirming sharpness on small screen | 3× focus loupe sampling full-res feed with peaking (§6.4a) |
 | App Store: is on-device the only mode? | Yes — no network/cloud stacking in scope |
 
 ## 13. Testing
