@@ -85,7 +85,7 @@ third-party license text ships in an in-app "Acknowledgements" screen.
 ```mermaid
 flowchart TD
     A[Launch · live viewfinder] --> B[Select lens<br/>UW / Wide / Tele]
-    B --> C[Manual exposure<br/>ISO + shutter, then LOCK]
+    B --> C[Manual exposure<br/>ISO + shutter + Kelvin WB, then LOCK]
     C --> D[Manual focus with peaking<br/>+ lens-position readout]
     D --> E[Rack to NEAREST point<br/>3x loupe · tap 'Set Near']
     E --> F[Rack to FARTHEST point<br/>3x loupe · tap 'Set Far']
@@ -165,17 +165,36 @@ The macro use case will usually favor the **wide** or **telephoto** module; ultr
 offered for larger reels/boxes.
 
 ### 6.2 Manual exposure — `CameraService.setExposure`
+
+Two independent things the user controls, both held constant across the 8-frame stack:
+
+**(a) Brightness / EV** — via ISO + shutter:
 ```swift
 try device.lockForConfiguration()
 device.setExposureModeCustom(duration: shutter, iso: iso) { _ in }
-device.setWhiteBalanceModeLocked(with: currentGains) { _ in }
 device.unlockForConfiguration()
 ```
 - UI sliders for **ISO** (`device.activeFormat.minISO…maxISO`) and **shutter**
   (`minExposureDuration…maxExposureDuration`), shown as familiar 1/x values.
 - A live **histogram + EV meter** derived from the video-data-output frames so the user can
-  nail exposure before locking.
-- Once set, exposure/WB are **locked for the whole stack**.
+  nail exposure before locking. (EV — e.g. 2.7 — is *brightness*, not color; it's the ISO/shutter
+  combination, and it's a separate control from white balance below.)
+
+**(b) Color temperature / white balance (Kelvin)** — for the light box:
+```swift
+// Set a fixed Kelvin (e.g. 5000K) so light-box color is neutral and identical every frame
+let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: tint)
+var gains = device.deviceWhiteBalanceGains(for: tt)
+gains = clampToSupportedRange(gains, device)   // guard against maxWhiteBalanceGain
+device.setWhiteBalanceModeLocked(with: gains) { _ in }
+```
+- A **Kelvin slider** (~2500K–8000K) plus a fine **tint** control, with quick presets
+  (Daylight 5600K, LED panel 5000K, Tungsten 3200K) since light boxes vary.
+- Optional **one-tap gray-card lock**: point at a white/gray card in the box and lock neutral WB,
+  which we then read back as a Kelvin value for reference.
+
+Once set, **both EV and Kelvin white balance are locked for the entire stack** — no exposure or
+color drift between frames, which is what keeps the fused result clean.
 
 ### 6.3 Manual focus + "where is it focused" — `FocusController`
 - Focus slider maps to `setFocusModeLocked(lensPosition:)`, `lensPosition ∈ [0,1]`.
@@ -267,7 +286,8 @@ with the remaining 6 evenly spaced between them.
 ```
 StackSet
 ├── id, createdAt, deviceModel, lensID
-├── exposure: { iso, shutterSeconds, whiteBalanceGains }
+├── exposure: { iso, shutterSeconds, evReadout }
+├── whiteBalance: { kelvin, tint, gains }
 ├── range: { lensPositionNear, lensPositionFar, stepCount, spacingMode }
 ├── frames: [ Frame { index, lensPosition, fileURL(dng/heif), capturedAt } ]
 └── result: { mergedImageURL, depthMapURL, engineOptions, processedAt } | nil
@@ -282,7 +302,8 @@ re-stacked with different engine options.
 
 1. **Viewfinder** — live feed, peaking overlay, lens picker chips, exposure/focus toggles,
    big shutter button.
-2. **Exposure panel** — ISO + shutter sliders, histogram, EV meter, "Lock" button.
+2. **Exposure panel** — ISO + shutter sliders, histogram, EV meter; a **Kelvin + tint** white-balance
+   slider with presets and gray-card lock; a single "Lock" for both.
 3. **Focus panel** — focus slider + reticle readout, **3× focus loupe** for confirming sharpness,
    **Set Near** / **Set Far** buttons, a planned-steps strip showing the 8 focus planes.
 4. **Capture progress** — "Frame 3 / 8", cancel.
