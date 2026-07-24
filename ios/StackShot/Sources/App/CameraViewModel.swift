@@ -13,7 +13,8 @@ final class CameraViewModel: ObservableObject {
     }
 
     let camera = CameraService()
-    private let peaking = FocusPeakingProcessor()
+    private let preview = PreviewFrameProcessor()
+    private let stacking = StackingService.shared
     private var bracket: FocusBracketController?
 
     // Live view
@@ -40,7 +41,7 @@ final class CameraViewModel: ObservableObject {
     @Published var farAnchor: Float?
 
     // Bracket
-    @Published var stepCount = 8
+    @Published var stepCount = AppConfig.Bracket.defaultStepCount
     @Published var phase: Phase = .idle
     @Published var resultImage: UIImage?
     @Published var lastSet: StackSet?
@@ -50,13 +51,15 @@ final class CameraViewModel: ObservableObject {
         exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
     }
 
+    // MARK: - Lifecycle
+
     func start() async {
         do {
             try await camera.configure()
             lenses = camera.lenses
             selectedLensID = camera.currentLens?.id
             camera.onPreviewFrame = { [weak self] buffer in
-                guard let self, let output = self.peaking.process(buffer) else { return }
+                guard let self, let output = self.preview.process(buffer) else { return }
                 Task { @MainActor in
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
@@ -65,7 +68,7 @@ final class CameraViewModel: ObservableObject {
             }
             camera.start()
         } catch {
-            errorMessage = error.localizedDescription
+            report(error)
         }
     }
 
@@ -79,12 +82,12 @@ final class CameraViewModel: ObservableObject {
                 nearAnchor = nil
                 farAnchor = nil
             } catch {
-                errorMessage = error.localizedDescription
+                report(error)
             }
         }
     }
 
-    // MARK: Exposure / WB
+    // MARK: - Exposure / WB
 
     func applyAndLockExposure() {
         do {
@@ -92,13 +95,13 @@ final class CameraViewModel: ObservableObject {
             try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
             exposureLocked = true
         } catch {
-            errorMessage = error.localizedDescription
+            report(error)
         }
     }
 
     func unlockExposure() { exposureLocked = false }
 
-    // MARK: Focus
+    // MARK: - Focus + loupe
 
     private func pushFocus() {
         try? camera.setFocus(lensPosition: lensPosition)
@@ -106,21 +109,22 @@ final class CameraViewModel: ObservableObject {
 
     func setLoupe(visible: Bool) {
         loupeVisible = visible
-        peaking.loupeCenter = visible ? CGPoint(x: 0.5, y: 0.5) : nil
+        preview.update { $0.loupeCenter = visible ? CGPoint(x: 0.5, y: 0.5) : nil }
     }
 
     func moveLoupe(to normalizedPoint: CGPoint) {
-        peaking.loupeCenter = normalizedPoint
+        preview.update { $0.loupeCenter = normalizedPoint }
     }
 
     func setLoupeMagnification(_ m: CGFloat) {
-        peaking.loupeMagnification = min(max(m, 2), 6)
+        let range = AppConfig.Loupe.magnificationRange
+        preview.update { $0.loupeMagnification = min(max(m, range.lowerBound), range.upperBound) }
     }
 
     func markNear() { nearAnchor = lensPosition }
     func markFar() { farAnchor = lensPosition }
 
-    // MARK: Capture + stack
+    // MARK: - Capture + stack
 
     func captureStack() {
         guard let near = nearAnchor, let far = farAnchor, canCapture else { return }
@@ -141,12 +145,11 @@ final class CameraViewModel: ObservableObject {
                         }
                     }
                 }
-                lastSet = set
                 try await stack(set: set)
             } catch is CancellationError {
                 phase = .idle
             } catch {
-                errorMessage = error.localizedDescription
+                report(error)
                 phase = .idle
             }
         }
@@ -158,40 +161,27 @@ final class CameraViewModel: ObservableObject {
 
     func stack(set: StackSet) async throws {
         phase = .stacking(0)
-        let engine = StackEngineFactory.make()
-        let urls = set.frames.map { StackStore.shared.frameURL(set, $0) }
-        let image = try await engine.stack(frameURLs: urls) { p in
+        let (updated, image) = try await stacking.stackAndPersist(set) { p in
             Task { @MainActor in self.phase = .stacking(p) }
         }
         resultImage = image
-
-        // Persist merged result next to the frames and record it in the manifest.
-        if let data = image.heicOrJPEGData() {
-            var updated = set
-            let fileName = "stacked.heic"
-            try data.write(to: StackStore.shared.directory(for: set).appendingPathComponent(fileName),
-                           options: .atomic)
-            updated.result = .init(mergedFileName: fileName, engine: engine.name, processedAt: Date())
-            try StackStore.shared.saveManifest(updated)
-            lastSet = updated
-        }
+        lastSet = updated
         phase = .done
     }
 
     func saveResultToPhotos() {
         guard let image = resultImage else { return }
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        stacking.saveToPhotos(image)
     }
 
     func resetForNextStack() {
         phase = .idle
         resultImage = nil
     }
-}
 
-private extension UIImage {
-    /// iOS 17's built-in heicData(), falling back to JPEG for exotic pixel formats.
-    func heicOrJPEGData() -> Data? {
-        heicData() ?? jpegData(compressionQuality: 0.95)
+    // MARK: - Errors
+
+    private func report(_ error: Error) {
+        errorMessage = error.localizedDescription
     }
 }

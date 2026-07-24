@@ -5,8 +5,8 @@ import SwiftUI
 struct ExposurePanel: View {
     @EnvironmentObject var vm: CameraViewModel
 
-    private let shutterStops: [Double] = [4, 8, 15, 30, 60, 125, 250, 500, 1000]
-    private let wbPresets: [(String, Float)] = [("Tungsten", 3200), ("LED", 5000), ("Daylight", 5600)]
+    private let shutterStops = AppConfig.Exposure.shutterDenominators
+    private let wbPresets = AppConfig.Exposure.whiteBalancePresets
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -14,7 +14,7 @@ struct ExposurePanel: View {
                 .frame(height: 40)
 
             row("ISO \(Int(vm.iso))") {
-                Slider(value: $vm.iso, in: 25...1600, step: 25)
+                Slider(value: $vm.iso, in: AppConfig.Exposure.isoRange, step: 25)
             }
 
             row("1/\(Int(vm.shutterDenominator)) s") {
@@ -27,12 +27,12 @@ struct ExposurePanel: View {
             }
 
             row("\(Int(vm.kelvin)) K") {
-                Slider(value: $vm.kelvin, in: 2500...8000, step: 50)
+                Slider(value: $vm.kelvin, in: AppConfig.Exposure.kelvinRange, step: 50)
             }
 
             HStack {
-                ForEach(wbPresets, id: \.1) { preset in
-                    Button("\(preset.0) \(Int(preset.1))K") { vm.kelvin = preset.1 }
+                ForEach(wbPresets, id: \.kelvin) { preset in
+                    Button("\(preset.name) \(Int(preset.kelvin))K") { vm.kelvin = preset.kelvin }
                         .font(.caption2)
                         .buttonStyle(.bordered)
                 }
@@ -40,7 +40,7 @@ struct ExposurePanel: View {
             }
 
             row(String(format: "Tint %+.0f", vm.tint)) {
-                Slider(value: $vm.tint, in: -50...50, step: 1)
+                Slider(value: $vm.tint, in: AppConfig.Exposure.tintRange, step: 1)
             }
 
             Button(vm.exposureLocked ? "Unlock exposure" : "Apply & lock exposure") {

@@ -9,7 +9,7 @@ struct ViewfinderScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            // Live feed with peaking baked in by FocusPeakingProcessor.
+            // Live feed with peaking baked in by PreviewFrameProcessor.
             if let image = vm.viewfinderImage {
                 GeometryReader { geo in
                     Image(uiImage: image)
@@ -107,7 +107,7 @@ struct ViewfinderScreen: View {
 
                 CaptureButton()
 
-                Stepper(value: $vm.stepCount, in: 3...20) {
+                Stepper(value: $vm.stepCount, in: AppConfig.Bracket.stepRange) {
                     Text("\(vm.stepCount) frames")
                         .font(.caption)
                         .monospacedDigit()
@@ -141,14 +141,16 @@ struct CaptureButton: View {
 struct LoupeView: View {
     let image: UIImage
     @EnvironmentObject var vm: CameraViewModel
-    @State private var magnification: CGFloat = 3
-    @State private var gestureBase: CGFloat = 3
+    @State private var magnification = AppConfig.Loupe.defaultMagnification
+    @State private var gestureBase = AppConfig.Loupe.defaultMagnification
 
     var body: some View {
+        let side = AppConfig.Loupe.diameter
+        let range = AppConfig.Loupe.magnificationRange
         VStack(spacing: 4) {
             Image(uiImage: image)
                 .resizable()
-                .frame(width: 240, height: 240)
+                .frame(width: side, height: side)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(.yellow, lineWidth: 2))
             Text(String(format: "%.1f×", magnification))
@@ -158,7 +160,7 @@ struct LoupeView: View {
         .gesture(
             MagnificationGesture()
                 .onChanged { value in
-                    magnification = min(max(gestureBase * value, 2), 6)
+                    magnification = min(max(gestureBase * value, range.lowerBound), range.upperBound)
                     vm.setLoupeMagnification(magnification)
                 }
                 .onEnded { _ in gestureBase = magnification }

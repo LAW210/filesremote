@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Saved StackSets: browse, re-open, re-stack without re-shooting.
+/// Deliberately independent of CameraViewModel — it only touches the store.
 struct LibraryScreen: View {
-    @EnvironmentObject var vm: CameraViewModel
     @State private var sets: [StackSet] = []
 
     var body: some View {
@@ -53,11 +53,12 @@ struct LibraryScreen: View {
 }
 
 struct StackSetDetail: View {
-    let set: StackSet
-    @EnvironmentObject var vm: CameraViewModel
+    @State var set: StackSet
     @State private var merged: UIImage?
     @State private var stacking = false
     @State private var errorText: String?
+
+    private let service = StackingService.shared
 
     var body: some View {
         ScrollView {
@@ -89,7 +90,7 @@ struct StackSetDetail: View {
 
                 if let merged {
                     Button("Save to Photos") {
-                        UIImageWriteToSavedPhotosAlbum(merged, nil, nil, nil)
+                        service.saveToPhotos(merged)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -106,19 +107,18 @@ struct StackSetDetail: View {
     }
 
     private func loadMerged() {
-        guard let result = set.result else { return }
-        let url = StackStore.shared.directory(for: set).appendingPathComponent(result.mergedFileName)
-        merged = UIImage(contentsOfFile: url.path)
+        merged = service.mergedImage(for: set)
     }
 
+    /// Same persistence path as the capture flow: the re-stacked result is written
+    /// to disk and recorded in the manifest, not just displayed.
     private func restack() {
         stacking = true
         errorText = nil
-        let urls = set.frames.map { StackStore.shared.frameURL(set, $0) }
         Task {
             do {
-                let engine = StackEngineFactory.make()
-                let image = try await engine.stack(frameURLs: urls) { _ in }
+                let (updated, image) = try await service.stackAndPersist(set)
+                set = updated
                 merged = image
             } catch {
                 errorText = error.localizedDescription

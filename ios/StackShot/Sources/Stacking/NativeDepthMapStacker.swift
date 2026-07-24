@@ -12,7 +12,7 @@ final class NativeDepthMapStacker: StackEngine {
     let name = "native depth-map (Swift fallback)"
 
     /// Frames are downscaled to this max dimension for the draft to bound memory.
-    private let maxDimension: CGFloat = 2048
+    private let maxDimension = AppConfig.Stacking.fallbackMaxDimension
 
     func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> UIImage {
         guard !frameURLs.isEmpty else { throw StackEngineError.noFrames }

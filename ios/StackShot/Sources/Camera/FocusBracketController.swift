@@ -40,7 +40,7 @@ final class FocusBracketController {
     func run(plan: Plan,
              exposure: StackSet.Exposure,
              whiteBalance: StackSet.WhiteBalance,
-             startTimerSeconds: Int = 2,
+             startTimerSeconds: Int = AppConfig.Bracket.startTimerSeconds,
              progress: @escaping (Progress) -> Void) async throws -> StackSet {
         isCancelled = false
 
