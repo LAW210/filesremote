@@ -33,7 +33,7 @@ final class CaptureDefaultsTests: XCTestCase {
 
     func testRoundtripSaveThenLoadReturnsSameValues() {
         let original = CaptureDefaults(
-            evBias: -1.0 / 3.0,
+            evBias: 2.0 / 3.0,      // must be inside evBiasRange, which is positive-only
             kelvin: 3200,
             tint: -12,
             stepCount: 12,
