@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// Saved StackSets: browse, re-open, re-stack without re-shooting.
+/// Saved StackSets: browse stacked results, export them, delete them.
 /// Deliberately independent of CameraViewModel — it only touches the store.
+///
+/// There is no re-stack here: source frames are deleted once a stack succeeds,
+/// so a saved set is its final image plus its capture metadata.
 struct LibraryScreen: View {
     @State private var sets: [StackSet] = []
-    @State private var corruptCount: Int = 0
 
     var body: some View {
         List {
@@ -24,21 +26,12 @@ struct LibraryScreen: View {
                 for index in offsets { StackStore.shared.delete(sets[index]) }
                 sets.remove(atOffsets: offsets)
             }
-            if corruptCount > 0 {
-                Label("\(corruptCount) stack(s) could not be read", systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
         }
         .navigationTitle("Library")
         .toolbar {
             NavigationLink("Licenses") { AcknowledgementsScreen() }
         }
-        .onAppear {
-            let result = StackStore.shared.loadAll()
-            sets = result.sets
-            corruptCount = result.corruptCount
-        }
+        .onAppear { sets = StackStore.shared.loadAll() }
     }
 
     private func row(for set: StackSet) -> some View {
@@ -67,11 +60,11 @@ struct LibraryScreen: View {
 }
 
 struct StackSetDetail: View {
-    @State var set: StackSet
+    let set: StackSet
+
     @State private var merged: UIImage?
     @State private var depthMap: UIImage?
     @State private var showDepthMap = false
-    @State private var stacking = false
     @State private var errorText: String?
 
     private let service = StackingService.shared
@@ -84,8 +77,6 @@ struct StackSetDetail: View {
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 8))
-                } else if stacking {
-                    ProgressView("Stacking…")
                 } else {
                     Text("Not stacked yet").foregroundStyle(.secondary)
                 }
@@ -95,26 +86,10 @@ struct StackSetDetail: View {
                         .toggleStyle(.button)
                 }
 
-                if set.framesPurged == true {
-                    Label("RAW frames were deleted after stacking — re-stacking is unavailable",
-                          systemImage: "trash.slash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(set.frames) { frame in
-                                FrameThumbnail(url: StackStore.shared.frameURL(set, frame))
-                            }
-                        }
-                    }
-
-                    Button(stacking ? "Stacking…" : "Re-stack") {
-                        restack()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(stacking)
-                }
+                Text("\(set.frames.count) frames · ISO \(Int(set.exposure.iso)) · " +
+                     "1/\(Int(1 / set.exposure.shutterSeconds)) s · \(Int(set.whiteBalance.kelvin))K")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 // File-based save/share: the exact encoded bytes, never re-compressed.
                 if merged != nil, let url = service.mergedFileURL(for: set) {
@@ -140,33 +115,9 @@ struct StackSetDetail: View {
         }
         .navigationTitle(set.createdAt.formatted(date: .abbreviated, time: .shortened))
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { loadMerged() }
-    }
-
-    private func loadMerged() {
-        merged = service.mergedImage(for: set)
-        depthMap = service.depthMapImage(for: set)
-    }
-
-    /// Same persistence path as the capture flow: the re-stacked result is written
-    /// to disk and recorded in the manifest, not just displayed.
-    private func restack() {
-        stacking = true
-        errorText = nil
-        // Frames are never deleted on a library re-stack — the user already chose to
-        // keep this set's frames; only the format setting is honored.
-        let format = CaptureDefaults.load().outputFormat
-        Task {
-            do {
-                let (updated, output) = try await service.stackAndPersist(set, outputFormat: format)
-                set = updated
-                merged = output.merged
-                depthMap = output.depthMap
-                if output.depthMap == nil { showDepthMap = false }
-            } catch {
-                errorText = error.localizedDescription
-            }
-            stacking = false
+        .onAppear {
+            merged = service.mergedImage(for: set)
+            depthMap = service.depthMapImage(for: set)
         }
     }
 }

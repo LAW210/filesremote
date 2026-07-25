@@ -56,8 +56,7 @@ final class FocusBracketController {
                          stepCount: plan.stepCount,
                          spacingMode: "linearLensPosition"),
             frames: [],
-            result: nil,
-            framesPurged: nil)
+            result: nil)
         let dir = try store.createDirectory(for: set)
         var completed = false
         defer { if !completed { try? FileManager.default.removeItem(at: dir) } }

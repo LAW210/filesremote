@@ -18,11 +18,10 @@ final class StackingService {
     /// Runs the best available engine over the set's frames, writes the merged image
     /// beside them, records it in the manifest, and returns the updated set + StackOutput.
     ///
-    /// `outputFormat` controls the merged file's encoding (JPEG by default — listing
-    /// sites like eBay don't accept HEIC). When `deleteFramesAfter` is true, the source
-    /// RAW frames are removed once the merged result and manifest are safely on disk,
-    /// leaving only the final image (the set is marked `framesPurged`, so re-stacking
-    /// is no longer possible for it).
+    /// `outputFormat` controls the merged file's encoding (JPEG for listing sites, PNG
+    /// as a lossless editing master). When `deleteFramesAfter` is true, the source RAW
+    /// frames are removed once the merged result is safely on disk, leaving only the
+    /// final image — a set with a result therefore has no frame files left.
     func stackAndPersist(_ set: StackSet,
                          outputFormat: AppConfig.Stacking.OutputFormat = .jpeg,
                          deleteFramesAfter: Bool = false,
@@ -45,7 +44,7 @@ final class StackingService {
             }
 
             var depthMapFileName: String?
-            if let depthData = output.depthMap?.heicOrJPEGData() {
+            if let depthData = output.depthMap?.pngData() {
                 let depthFileName = AppConfig.Stacking.depthMapFileName
                 try depthData.write(to: store.directory(for: set).appendingPathComponent(depthFileName),
                                     options: .atomic)
@@ -57,13 +56,11 @@ final class StackingService {
                                    processedAt: Date(),
                                    depthMapFileName: depthMapFileName)
 
-            // Frames are deleted only after the merged file exists on disk, and the
-            // purge is recorded in the same manifest write that records the result.
+            // Frames are deleted only after the merged file exists on disk.
             if deleteFramesAfter {
                 for frame in updated.frames {
                     try? FileManager.default.removeItem(at: store.frameURL(updated, frame))
                 }
-                updated.framesPurged = true
             }
 
             try store.saveManifest(updated)
@@ -79,12 +76,7 @@ final class StackingService {
                         describing set: StackSet) -> Data? {
         guard let cg = image.cgImage else { return fallbackEncode(image, as: format) }
 
-        let type: UTType
-        switch format {
-        case .jpeg: type = .jpeg
-        case .png: type = .png
-        case .heic: type = .heic
-        }
+        let type: UTType = format == .jpeg ? .jpeg : .png
 
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(
@@ -126,7 +118,6 @@ final class StackingService {
         switch format {
         case .jpeg: return image.jpegData(compressionQuality: AppConfig.Stacking.jpegQuality)
         case .png: return image.pngData()
-        case .heic: return image.heicOrJPEGData()
         }
     }
 
@@ -172,9 +163,3 @@ enum PhotosSaveError: LocalizedError {
     }
 }
 
-extension UIImage {
-    /// iOS 17's built-in heicData(), falling back to JPEG for exotic pixel formats.
-    func heicOrJPEGData() -> Data? {
-        heicData() ?? jpegData(compressionQuality: 0.95)
-    }
-}

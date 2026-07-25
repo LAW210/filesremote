@@ -32,10 +32,8 @@ final class PreviewFrameProcessor {
         let viewfinder: UIImage
         let loupe: UIImage?
         /// 64-bin luminance histogram, normalized to 0–1, for the exposure panel.
+        /// Blown highlights are shown positionally by the zebra overlay, not counted.
         let histogram: [Float]
-        /// Fraction of sampled pixels at/above luma 250 — blown highlights that no
-        /// edit can recover. Chrome-in-a-light-box clips easily; surfaced in the UI.
-        let clippedFraction: Float
     }
 
     private let lock = NSLock()
@@ -81,9 +79,8 @@ final class PreviewFrameProcessor {
             loupe = renderLoupe(from: composited, center: center,
                                 magnification: snapshot.loupeMagnification)
         }
-        let (histogram, clipped) = luminanceHistogram(of: pixelBuffer)
         return Output(viewfinder: viewfinder, loupe: loupe,
-                      histogram: histogram, clippedFraction: clipped)
+                      histogram: luminanceHistogram(of: pixelBuffer))
     }
 
     // MARK: - Stages
@@ -148,14 +145,12 @@ final class PreviewFrameProcessor {
         return UIImage(cgImage: cg)
     }
 
-    /// Cheap CPU histogram from a strided sample of the BGRA buffer (~16k samples/frame),
-    /// plus the fraction of sampled pixels at/above luma 250 (blown highlights).
-    private func luminanceHistogram(of pixelBuffer: CVPixelBuffer,
-                                    bins: Int = 64) -> (bins: [Float], clippedFraction: Float) {
+    /// Cheap CPU histogram from a strided sample of the BGRA buffer (~16k samples/frame).
+    private func luminanceHistogram(of pixelBuffer: CVPixelBuffer, bins: Int = 64) -> [Float] {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            return ([Float](repeating: 0, count: bins), 0)
+            return [Float](repeating: 0, count: bins)
         }
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
@@ -163,8 +158,6 @@ final class PreviewFrameProcessor {
         let stride = max(1, width / 128)
 
         var counts = [Float](repeating: 0, count: bins)
-        var clipped: Float = 0
-        var total: Float = 0
         var row = 0
         while row < height {
             let rowPtr = base.advanced(by: row * rowBytes).assumingMemoryBound(to: UInt8.self)
@@ -175,14 +168,11 @@ final class PreviewFrameProcessor {
                          + 0.299 * Float(rowPtr[p + 2])
                 let bin = min(bins - 1, Int(luma) * bins / 256)
                 counts[bin] += 1
-                if luma >= 250 { clipped += 1 }
-                total += 1
                 col += stride
             }
             row += stride
         }
-        let clippedFraction = total > 0 ? clipped / total : 0
-        guard let peak = counts.max(), peak > 0 else { return (counts, clippedFraction) }
-        return (counts.map { $0 / peak }, clippedFraction)
+        guard let peak = counts.max(), peak > 0 else { return counts }
+        return counts.map { $0 / peak }
     }
 }

@@ -30,9 +30,8 @@ final class StackSetCodableTests: XCTestCase {
                 .init(index: 0, lensPosition: 0.2, fileName: "frame_00.heic", capturedAt: Date()),
                 .init(index: 1, lensPosition: 0.4, fileName: "frame_01.heic", capturedAt: Date()),
             ],
-            result: .init(mergedFileName: "stacked.heic", engine: "swift-fallback",
-                         processedAt: Date(), depthMapFileName: depthMapFileName),
-            framesPurged: nil
+            result: .init(mergedFileName: "stacked.jpg", engine: "swift-fallback",
+                         processedAt: Date(), depthMapFileName: depthMapFileName)
         )
     }
 
@@ -48,12 +47,12 @@ final class StackSetCodableTests: XCTestCase {
     }
 
     func testRoundtripWithDepthMapFileNameNonNil() throws {
-        let original = makeStackSet(depthMapFileName: "depthmap.heic")
+        let original = makeStackSet(depthMapFileName: "depthmap.png")
         let data = try makeEncoder().encode(original)
         let decoded = try makeDecoder().decode(StackSet.self, from: data)
 
         XCTAssertEqual(decoded.id, original.id)
-        XCTAssertEqual(decoded.result?.depthMapFileName, "depthmap.heic")
+        XCTAssertEqual(decoded.result?.depthMapFileName, "depthmap.png")
     }
 
     func testDecodingLegacyManifestWithoutDepthMapFileNameSucceeds() throws {
@@ -70,7 +69,7 @@ final class StackSetCodableTests: XCTestCase {
             { "index": 0, "lensPosition": 0.2, "fileName": "frame_00.heic", "capturedAt": "2024-01-15T10:30:05Z" }
           ],
           "result": {
-            "mergedFileName": "stacked.heic",
+            "mergedFileName": "stacked.jpg",
             "engine": "swift-fallback",
             "processedAt": "2024-01-15T10:30:10Z"
           }
@@ -79,8 +78,7 @@ final class StackSetCodableTests: XCTestCase {
         let data = legacyJSON.data(using: .utf8)!
         let decoded = try makeDecoder().decode(StackSet.self, from: data)
 
-        XCTAssertEqual(decoded.result?.mergedFileName, "stacked.heic")
+        XCTAssertEqual(decoded.result?.mergedFileName, "stacked.jpg")
         XCTAssertNil(decoded.result?.depthMapFileName)
-        XCTAssertNil(decoded.framesPurged)
     }
 }

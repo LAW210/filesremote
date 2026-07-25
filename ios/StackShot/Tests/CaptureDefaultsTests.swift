@@ -41,7 +41,7 @@ final class CaptureDefaultsTests: XCTestCase {
             stepCount: 12,
             peakingEnabled: false,
             zebraEnabled: true,
-            outputFormat: .heic,
+            outputFormat: .png,
             autoSaveToPhotos: false,
             squareGuideEnabled: true
         )

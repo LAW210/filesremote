@@ -1,6 +1,10 @@
 import SwiftUI
 
-/// Shows the stacked result with a per-frame filmstrip, save/share, and re-stack.
+/// Shows the stacked result with its capture settings, a depth-map toggle, and share.
+///
+/// No per-frame filmstrip and no Save-to-Photos button: source frames are deleted as
+/// soon as the stack succeeds, and the finished file is auto-saved to Photos (see
+/// Settings) — the share sheet covers everything else.
 struct ReviewSheet: View {
     @EnvironmentObject var vm: CameraViewModel
     @Environment(\.dismiss) private var dismiss
@@ -24,11 +28,17 @@ struct ReviewSheet: View {
                 }
 
                 if let set = vm.lastSet {
-                    filmstrip(set: set)
                     Text("\(set.frames.count) frames · ISO \(Int(set.exposure.iso)) · " +
                          "1/\(Int(1 / set.exposure.shutterSeconds)) s · \(Int(set.whiteBalance.kelvin))K")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                // Confirms the auto-save landed; the Library can re-save if it didn't.
+                if vm.resultSavedToPhotos {
+                    Label("Saved to Photos", systemImage: "checkmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.green)
                 }
             }
             .padding()
@@ -44,31 +54,7 @@ struct ReviewSheet: View {
                         ShareLink(item: url)
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    // With auto-save on, this arrives already showing "Saved ✓".
-                    Button(vm.resultSavedToPhotos ? "Saved ✓" : "Save to Photos") {
-                        vm.saveResultToPhotos()
-                    }
-                    .disabled(vm.mergedFileURL == nil || vm.resultSavedToPhotos)
-                }
             }
         }
-    }
-
-    private func filmstrip(set: StackSet) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(set.frames) { frame in
-                    VStack(spacing: 2) {
-                        FrameThumbnail(url: StackStore.shared.frameURL(set, frame))
-                        Text(String(format: "%.2f", frame.lensPosition))
-                            .font(.system(size: 9)).monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .frame(height: 76)
     }
 }
-

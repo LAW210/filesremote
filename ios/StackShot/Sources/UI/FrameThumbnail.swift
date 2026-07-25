@@ -1,8 +1,8 @@
 import ImageIO
 import SwiftUI
 
-/// Small square thumbnail for a frame or merged result on disk (DNG/HEIC/PNG),
-/// decoded off the main actor. Used by the review filmstrip and the library.
+/// Small square thumbnail for an image on disk (JPEG/PNG/DNG/HEIC), decoded off
+/// the main actor. Used for the Library's row thumbnails.
 struct FrameThumbnail: View {
     let url: URL
     @State private var image: UIImage?

@@ -45,10 +45,9 @@ struct StackSet: Codable, Identifiable {
     var whiteBalance: WhiteBalance
     var range: Range
     var frames: [Frame]
+    /// Non-nil once stacking succeeded. Source frames are always deleted at that
+    /// point, so a set with a result is final — its frame files no longer exist.
     var result: Result?
-    /// True when the source frames were deleted after a successful stack (user setting).
-    /// Optional so manifests written before this field still decode.
-    var framesPurged: Bool?
 }
 
 /// Persists StackSets as folders of frames + manifest.json in the app sandbox.
@@ -81,22 +80,14 @@ final class StackStore {
         try data.write(to: directory(for: set).appendingPathComponent("manifest.json"), options: .atomic)
     }
 
-    func loadAll() -> (sets: [StackSet], corruptCount: Int) {
+    func loadAll() -> [StackSet] {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let dirs = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        var sets: [StackSet] = []
-        var corruptCount = 0
-        for dir in dirs {
-            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")) else { continue }
-            if let set = try? decoder.decode(StackSet.self, from: data) {
-                sets.append(set)
-            } else {
-                corruptCount += 1
-            }
-        }
-        sets.sort { $0.createdAt > $1.createdAt }
-        return (sets, corruptCount)
+        return dirs
+            .compactMap { try? Data(contentsOf: $0.appendingPathComponent("manifest.json")) }
+            .compactMap { try? decoder.decode(StackSet.self, from: $0) }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     func frameURL(_ set: StackSet, _ frame: StackSet.Frame) -> URL {

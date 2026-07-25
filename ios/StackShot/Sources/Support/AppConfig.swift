@@ -31,16 +31,16 @@ enum AppConfig {
         /// The Swift fallback engine downscales to this to bound memory and CPU;
         /// the embedded C++ engine works at full resolution.
         static let fallbackMaxDimension: CGFloat = 2048
-        static let depthMapFileName = "depthmap.heic"
+        /// Diagnostic artifact — PNG so the per-pixel frame indices stay exact.
+        static let depthMapFileName = "depthmap.png"
 
-        /// Format of the final stacked image. JPEG is the default because listing
-        /// sites (eBay accepts JPEG/PNG/TIFF/BMP/GIF/WebP — not HEIC) want it and
-        /// recommend high-quality JPEG uploads. PNG is the lossless master for
-        /// edit-then-export workflows (~4–6× larger); HEIC saves space for archiving.
+        /// Format of the final stacked image. Both are formats listing sites accept
+        /// (eBay takes JPEG/PNG/TIFF/BMP/GIF/WebP — notably not HEIC): JPEG for
+        /// direct upload, PNG as a lossless master for edit-then-export workflows
+        /// (~4–6× larger, so the only JPEG generation is your editor's final export).
         enum OutputFormat: String, CaseIterable, Identifiable {
             case jpeg
             case png
-            case heic
 
             var id: String { rawValue }
 
@@ -48,7 +48,6 @@ enum AppConfig {
                 switch self {
                 case .jpeg: return "stacked.jpg"
                 case .png: return "stacked.png"
-                case .heic: return "stacked.heic"
                 }
             }
 
@@ -56,7 +55,6 @@ enum AppConfig {
                 switch self {
                 case .jpeg: return "JPEG (eBay-friendly)"
                 case .png: return "PNG (lossless, for editing)"
-                case .heic: return "HEIC (smaller files)"
                 }
             }
         }

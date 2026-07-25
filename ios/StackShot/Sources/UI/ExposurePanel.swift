@@ -13,18 +13,11 @@ struct ExposurePanel: View {
             HistogramView(bins: vm.histogram)
                 .frame(height: 40)
 
-            HStack(spacing: 8) {
-                if let ev = vm.evReadout, let aperture = vm.currentAperture {
-                    Text(String(format: "EV₁₀₀ %+.1f  ·  f/%.1f", ev, aperture))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                // Blown highlights are unrecoverable in the edit — warn before capture.
-                Text(String(format: "%.1f%% clipped", vm.clippedFraction * 100))
-                    .foregroundStyle(vm.clippedFraction > 0.01 ? .orange : .secondary)
-                    .monospacedDigit()
+            if let ev = vm.evReadout, let aperture = vm.currentAperture {
+                Text(String(format: "EV₁₀₀ %+.1f  ·  f/%.1f", ev, aperture))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .font(.caption2)
 
             row("ISO \(Int(vm.iso))") {
                 Slider(value: $vm.iso, in: AppConfig.Exposure.isoRange, step: 25)

@@ -23,7 +23,6 @@ final class CameraViewModel: ObservableObject {
     @Published var loupeImage: UIImage?
     @Published var loupeVisible = false
     @Published var histogram: [Float] = []
-    @Published var clippedFraction: Float = 0
     @Published var errorMessage: String?
 
     // Lens
@@ -133,7 +132,6 @@ final class CameraViewModel: ObservableObject {
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
                     self.histogram = output.histogram
-                    self.clippedFraction = output.clippedFraction
                 }
             }
             preview.update { $0.peakingEnabled = peakingEnabled }
@@ -309,19 +307,6 @@ final class CameraViewModel: ObservableObject {
     /// URL of the last stack's merged file — the exact encoded bytes on disk.
     var mergedFileURL: URL? {
         lastSet.flatMap { stacking.mergedFileURL(for: $0) }
-    }
-
-    /// Saves the merged FILE to Photos (no re-encode — see StackingService.saveFileToPhotos).
-    func saveResultToPhotos() {
-        guard let url = mergedFileURL else { return }
-        Task {
-            do {
-                try await stacking.saveFileToPhotos(url)
-                resultSavedToPhotos = true
-            } catch {
-                report(error)
-            }
-        }
     }
 
     func resetForNextStack() {

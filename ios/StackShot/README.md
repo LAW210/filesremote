@@ -2,12 +2,15 @@
 
 Manual-control focus-stacking camera for iOS. Blueprint: `../../docs/focus-stack-ios/BLUEPRINT.md`.
 
-**Status: first draft, written off-device.** This code has not yet been compiled in Xcode or
-run on a phone — expect a shakedown pass. The structure follows the blueprint exactly.
+**Status: compiles and unit-tests green in CI; never yet run on a phone.** GitHub Actions
+builds the app, runs the unit tests, and separately compile-checks the embedded C++ engine
+path on every push. On-device behaviour (focus sweep, peaking, stack quality) is still
+entirely unvalidated — the first device session is the next milestone.
 
 ## Building
 
-Requires a Mac with Xcode 15+, and a physical iPhone (the Simulator has no camera).
+Requires a Mac with Xcode 16+ (current XcodeGen emits project format 77), and a
+physical iPhone (the Simulator has no camera).
 
 ```bash
 brew install xcodegen
@@ -26,8 +29,9 @@ Set your signing team, select your device, run.
   (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness.
 - **Set Near / Set Far** anchors → adjustable-count bracket (default 8, inclusive endpoints)
   with a 2 s start timer, per-step focus settle-wait, and RAW (DNG) capture with HEIF fallback.
-- Frames + `manifest.json` persisted per StackSet; merged result saved beside them.
-- **Library screen** to browse saved StackSets and re-stack without re-shooting, plus an
+- Each capture is a StackSet folder: `manifest.json` (capture settings + frame metadata)
+  plus the merged result. The RAW frames themselves are deleted once the stack succeeds.
+- **Library screen** to browse, export, and swipe-delete saved stacks, plus an
   **Acknowledgements screen** for the shipped licenses.
 - A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
   no alignment) so the end-to-end flow works before the C++ engine is wired in.
@@ -35,23 +39,26 @@ Set your signing team, select your device, run.
 - **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off,
   output format) carried across app launches.
 - **Settings sheet** (gear icon): stacked output as **JPEG quality 95 (default — eBay and
-  other listing sites accept JPEG, not HEIC)**, **PNG (lossless master, ~4–6× larger,
-  for edit-then-export workflows)**, or HEIC for smaller files.
+  other listing sites accept JPEG, not HEIC)** or **PNG (lossless master, ~4–6× larger,
+  for edit-then-export workflows)**.
 - **Torch toggle** in the focus panel for extra illumination (full brightness; resets on
   lens switch).
+- **Files-app visibility**: the app's stacks are browsable in Files and over cable in
+  Finder, for dragging masters straight into a desktop editor.
 - **Per-frame capture retry**: one transient AVFoundation failure no longer aborts (and
   deletes) the whole bracket.
 - **Sound-only capture feedback** — a tick per frame and a chime when the stack is done.
   Deliberately no haptics: vibration would shake the tripod during exposure.
-- **Highlight-clipping readout** beside the histogram (orange above 1%) — chrome in a
-  light box blows highlights easily, and clipped pixels are unrecoverable in the edit.
+- **Zebra overlay** (toggle in the focus panel) paints blown highlights red in the live
+  preview — chrome in a light box clips easily, and clipped pixels can't be recovered
+  in the edit.
 - **EXIF on the stacked file** (capture date, device, ISO, shutter) via CGImageDestination,
   so outputs date and attribute correctly in Photos and editors.
 - **RAW frames are deleted automatically** once the stacked image is safely written —
   only the final image is kept (so stacks can't be re-processed; re-shoot instead).
 - **Exact-bytes save & share**: Save to Photos and the share sheet both use the encoded
   file on disk directly (no decode/re-encode), so the quality-95 JPEG is compressed
-  exactly once, ever. Swipe-to-delete stacks in the Library.
+  exactly once, ever.
 - **Auto-save to Photos** (on by default): the finished JPEG file lands in your photo
   library the moment stacking completes — capture → stack → saved, no taps.
 - **1:1 crop guide** (Settings): dims what a square eBay-thumbnail crop would discard,
@@ -60,7 +67,6 @@ Set your signing team, select your device, run.
   resumes on return.
 - **Peaking on/off button** alongside the existing focus peaking overlay.
 - **One-tap gray-card white balance** lock using the device's gray-world estimate.
-- **Corrupt-stack warning** in the library when a StackSet's manifest fails to decode.
 - **Automatic cleanup** of failed or cancelled brackets so partial captures don't linger on disk.
 
 ## Running tests
@@ -70,8 +76,8 @@ xcodegen generate
 ```
 
 then open `StackShot.xcodeproj` in Xcode and run the StackShot scheme's tests with **⌘U**.
-Unit tests cover bracket spacing, settings persistence, and manifest coding. They are
-desk-verified only so far — this is the first time they'll actually execute, on the Mac.
+Unit tests cover bracket spacing, settings persistence, and manifest coding, and run on
+every push via `.github/workflows/ios-tests.yml`.
 
 ## Embedding the real engine (focus-stack + OpenCV)
 
@@ -81,10 +87,11 @@ The fallback stacker is deliberately simple. For production quality run:
 ./scripts/fetch_engine.sh
 ```
 
-then follow the three steps printed at the end (add the OpenCV xcframework and the vendored
-`focus-stack` sources to the target, enable `ENGINE_EMBEDDED` in `project.yml`, regenerate).
-`Bridge/FocusStackBridge.mm` calls the vendored `FocusStack` C++ class — verify its API names
-against the checkout, as noted in the file.
+That vendors the MIT `focus-stack` sources plus OpenCV's iOS `opencv2.framework`. The
+`project-engine.yml` spec wires both into a build with `ENGINE_EMBEDDED` enabled, and CI's
+`build-engine` job compiles exactly that on every push — so the ObjC++ bridge and the C++
+core are known to build for iOS. To run it on device, mirror those settings into
+`project.yml` (the `ENGINE_EMBEDDED` flags are commented out there) and regenerate.
 
 ## Licenses shipped
 
