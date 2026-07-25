@@ -16,8 +16,6 @@ struct StackSet: Codable, Identifiable {
         var lensPositionNear: Float
         var lensPositionFar: Float
         var stepCount: Int
-        /// "linearLensPosition" for v1; "diopter" reserved for later.
-        var spacingMode: String
     }
 
     struct Frame: Codable {

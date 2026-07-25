@@ -1,0 +1,65 @@
+# Compile-checks the embedded C++ engine path (ENGINE_EMBEDDED) against the vendored
+# focus-stack + OpenCV sources. Separate from ios-tests.yml so it only runs when the
+# engine, its bridge, or its build inputs actually change — it is the most expensive
+# job in the repo (vendors OpenCV, compiles ~30 C++ translation units) and the engine
+# path changes far less often than the app.
+name: engine build
+
+on:
+  push:
+    paths:
+      - "ios/StackShot/Bridge/**"
+      - "ios/StackShot/Sources/Stacking/**"
+      - "ios/StackShot/project-engine.yml"
+      - "ios/StackShot/scripts/fetch_engine.sh"
+      - ".github/workflows/engine-build.yml"
+  pull_request:
+    paths:
+      - "ios/StackShot/Bridge/**"
+      - "ios/StackShot/Sources/Stacking/**"
+      - "ios/StackShot/project-engine.yml"
+      - "ios/StackShot/scripts/fetch_engine.sh"
+      - ".github/workflows/engine-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build-engine:
+    # Compile-checks the embedded C++ engine path (ENGINE_EMBEDDED) using the
+    # standalone project-engine.yml spec. Build-only — no tests — since this
+    # job's purpose is to catch breakage in the engine bridge/vendor sources.
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install xcodegen
+
+      - name: Cache vendored engine + OpenCV
+        uses: actions/cache@v4
+        with:
+          path: ios/StackShot/Vendor
+          key: engine-vendor-opencv-4.9.0-v2
+
+      - name: Fetch engine sources
+        working-directory: ios/StackShot
+        run: scripts/fetch_engine.sh
+
+      - name: Generate Xcode project
+        working-directory: ios/StackShot
+        run: xcodegen generate --spec project-engine.yml
+
+      - name: Build with engine embedded
+        working-directory: ios/StackShot
+        # Device destination: opencv2.framework is a classic fat framework whose
+        # arm64 slice is a DEVICE slice — an arm64 simulator build would reject it.
+        # Build-only needs no signing.
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project StackShotEngine.xcodeproj \
+            -scheme StackShot \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

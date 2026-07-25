@@ -24,8 +24,7 @@ final class StackSetCodableTests: XCTestCase {
             lensID: "back-wide",
             exposure: .init(iso: 100, shutterSeconds: 1.0 / 60.0),
             whiteBalance: .init(kelvin: 5000, tint: 0),
-            range: .init(lensPositionNear: 0.2, lensPositionFar: 0.9, stepCount: 8,
-                        spacingMode: "linearLensPosition"),
+            range: .init(lensPositionNear: 0.2, lensPositionFar: 0.9, stepCount: 8),
             frames: [
                 .init(index: 0, lensPosition: 0.2, fileName: "frame_00.heic", capturedAt: Date()),
                 .init(index: 1, lensPosition: 0.4, fileName: "frame_01.heic", capturedAt: Date()),
@@ -55,7 +54,10 @@ final class StackSetCodableTests: XCTestCase {
         XCTAssertEqual(decoded.result?.depthMapFileName, "depthmap.png")
     }
 
-    func testDecodingLegacyManifestWithoutDepthMapFileNameSucceeds() throws {
+    /// A manifest written by an older build: it lacks `depthMapFileName` (added later)
+    /// and still carries `spacingMode` (since removed). Both directions of schema drift
+    /// must decode, so old capture records stay readable.
+    func testDecodingLegacyManifestSucceeds() throws {
         let legacyJSON = """
         {
           "id": "9E3C6B2A-6B7F-4B2A-9C3E-1234567890AB",

@@ -22,7 +22,6 @@ final class FocusBracketController {
     enum Progress {
         case startingTimer(seconds: Int)
         case capturing(frame: Int, of: Int)
-        case done
     }
 
     private let camera: CameraService
@@ -53,8 +52,7 @@ final class FocusBracketController {
             whiteBalance: whiteBalance,
             range: .init(lensPositionNear: plan.near,
                          lensPositionFar: plan.far,
-                         stepCount: plan.stepCount,
-                         spacingMode: "linearLensPosition"),
+                         stepCount: plan.stepCount),
             frames: [],
             result: nil)
         let dir = try store.createDirectory(for: set)
@@ -102,7 +100,6 @@ final class FocusBracketController {
 
         try store.saveManifest(set)
         completed = true
-        progress(.done)
         return set
     }
 

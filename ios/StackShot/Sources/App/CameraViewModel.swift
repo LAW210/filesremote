@@ -283,7 +283,6 @@ final class CameraViewModel: ObservableObject {
                         case .capturing(let f, let n):
                             self.phase = .capturing(frame: f, of: n)
                             self.playFrameTick()
-                        case .done: break
                         }
                     }
                 }

@@ -305,7 +305,7 @@ StackSet
 ├── id, createdAt, deviceModel, lensID
 ├── exposure: { iso, shutterSeconds }
 ├── whiteBalance: { kelvin, tint }
-├── range: { lensPositionNear, lensPositionFar, stepCount, spacingMode }
+├── range: { lensPositionNear, lensPositionFar, stepCount }
 ├── frames: [ Frame { index, lensPosition, fileName (dng|heic), capturedAt } ]
 └── result: { mergedFileName, engine, processedAt, depthMapFileName? } | nil
 ```
@@ -489,7 +489,9 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
 5. **Undecodable manifests are silently skipped**, so a directory that fails to decode
    is never reclaimed. Mitigated by only ever adding optional schema fields.
 6. **Diopter-even focus spacing** remains deferred; v1 spaces evenly in lens position,
-   which is only approximately even in real distance (§7).
+   which is only approximately even in real distance (§7). The `spacingMode` manifest
+   field that anticipated it was removed as speculative — it was written but never
+   read, and `JSONDecoder` ignores unknown keys, so reintroducing it later is free.
 
 ---
 
