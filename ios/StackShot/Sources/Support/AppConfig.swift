@@ -35,14 +35,30 @@ enum AppConfig {
 
         /// Format of the final stacked image. JPEG is the default because listing
         /// sites (eBay accepts JPEG/PNG/TIFF/BMP/GIF/WebP — not HEIC) want it and
-        /// recommend high-quality JPEG uploads; HEIC is offered to save space.
+        /// recommend high-quality JPEG uploads. PNG is the lossless master for
+        /// edit-then-export workflows (~4–6× larger); HEIC saves space for archiving.
         enum OutputFormat: String, CaseIterable, Identifiable {
             case jpeg
+            case png
             case heic
 
             var id: String { rawValue }
-            var mergedFileName: String { self == .jpeg ? "stacked.jpg" : "stacked.heic" }
-            var label: String { self == .jpeg ? "JPEG (eBay-friendly)" : "HEIC (smaller files)" }
+
+            var mergedFileName: String {
+                switch self {
+                case .jpeg: return "stacked.jpg"
+                case .png: return "stacked.png"
+                case .heic: return "stacked.heic"
+                }
+            }
+
+            var label: String {
+                switch self {
+                case .jpeg: return "JPEG (eBay-friendly)"
+                case .png: return "PNG (lossless, for editing)"
+                case .heic: return "HEIC (smaller files)"
+                }
+            }
         }
 
         static let jpegQuality: CGFloat = 0.95

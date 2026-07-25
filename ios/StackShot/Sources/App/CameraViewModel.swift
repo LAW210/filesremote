@@ -72,6 +72,9 @@ final class CameraViewModel: ObservableObject {
     /// True once the current result's file has been added to Photos (auto or manual).
     @Published var resultSavedToPhotos = false
 
+    /// Torch state — session-specific (not persisted); resets on lens switch.
+    @Published var torchEnabled = false
+
     /// Guards against `didSet` observers persisting the just-loaded values back to
     /// `UserDefaults` during `init`.
     private var isLoaded = false
@@ -138,6 +141,7 @@ final class CameraViewModel: ObservableObject {
                 exposureLocked = false      // new module → re-set and re-lock exposure
                 nearAnchor = nil
                 farAnchor = nil
+                torchEnabled = false        // torch belongs to the previous device
             } catch {
                 report(error)
             }
@@ -214,6 +218,18 @@ final class CameraViewModel: ObservableObject {
 
     func markNear() { nearAnchor = lensPosition }
     func markFar() { farAnchor = lensPosition }
+
+    // MARK: - Torch
+
+    func setTorch(_ on: Bool) {
+        do {
+            try camera.setTorch(enabled: on)
+            torchEnabled = on
+        } catch {
+            report(error)
+            if torchEnabled { torchEnabled = false }
+        }
+    }
 
     // MARK: - Capture + stack
 

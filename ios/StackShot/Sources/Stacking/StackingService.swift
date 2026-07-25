@@ -72,6 +72,7 @@ final class StackingService {
     private func encode(_ image: UIImage, as format: AppConfig.Stacking.OutputFormat) -> Data? {
         switch format {
         case .jpeg: return image.jpegData(compressionQuality: AppConfig.Stacking.jpegQuality)
+        case .png: return image.pngData()
         case .heic: return image.heicOrJPEGData()
         }
     }

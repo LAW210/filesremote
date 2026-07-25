@@ -172,6 +172,20 @@ final class CameraService: NSObject {
         return (tt.temperature, tt.tint)
     }
 
+    /// Turns the torch on (full brightness) or off for extra light-box illumination.
+    /// The torch belongs to the active device and resets when the lens changes.
+    func setTorch(enabled: Bool) throws {
+        guard let device else { throw CameraError.noCamera }
+        guard device.hasTorch else { throw CameraError.torchUnavailable }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        if enabled {
+            try device.setTorchModeOn(level: AVCaptureDevice.maxAvailableTorchLevel)
+        } else {
+            device.torchMode = .off
+        }
+    }
+
     func setFocus(lensPosition: Float) throws {
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
@@ -274,6 +288,7 @@ enum CameraError: LocalizedError {
     case noCamera
     case configurationFailed
     case captureFailed
+    case torchUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -282,6 +297,7 @@ enum CameraError: LocalizedError {
         case .noCamera: return "No back camera found."
         case .configurationFailed: return "Could not configure the camera session."
         case .captureFailed: return "Photo capture failed."
+        case .torchUnavailable: return "This lens has no torch."
         }
     }
 }

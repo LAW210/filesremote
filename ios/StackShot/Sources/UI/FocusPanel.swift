@@ -48,6 +48,14 @@ struct FocusPanel: View {
                 }
                 .toggleStyle(.button)
                 .tint(.green)
+
+                Toggle(isOn: .init(get: { vm.torchEnabled },
+                                   set: { vm.setTorch($0) })) {
+                    Label("Torch", systemImage: vm.torchEnabled ? "bolt.fill" : "bolt.slash")
+                        .font(.caption)
+                }
+                .toggleStyle(.button)
+                .tint(.orange)
             }
 
             HStack(spacing: 12) {

@@ -20,8 +20,10 @@ struct SettingsSheet: View {
                     Text("Stacked image format")
                 } footer: {
                     Text("JPEG (quality 95) uploads directly to listing sites — eBay " +
-                         "accepts JPEG but not HEIC. HEIC halves the file size for " +
-                         "personal archiving.")
+                         "accepts JPEG and PNG but not HEIC. PNG is a lossless master " +
+                         "(~4–6× larger) for edit-then-export workflows: the only JPEG " +
+                         "compression is your editor's final export. HEIC halves the " +
+                         "file size for personal archiving.")
                 }
 
                 Section {

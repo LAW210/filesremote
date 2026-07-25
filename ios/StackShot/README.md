@@ -35,7 +35,10 @@ Set your signing team, select your device, run.
 - **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off,
   output format) carried across app launches.
 - **Settings sheet** (gear icon): stacked output as **JPEG quality 95 (default — eBay and
-  other listing sites accept JPEG, not HEIC)** or HEIC for smaller files.
+  other listing sites accept JPEG, not HEIC)**, **PNG (lossless master, ~4–6× larger,
+  for edit-then-export workflows)**, or HEIC for smaller files.
+- **Torch toggle** in the focus panel for extra illumination (full brightness; resets on
+  lens switch).
 - **RAW frames are deleted automatically** once the stacked image is safely written —
   only the final image is kept (so stacks can't be re-processed; re-shoot instead).
 - **Exact-bytes save & share**: Save to Photos and the share sheet both use the encoded
