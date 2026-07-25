@@ -49,8 +49,22 @@ final class CameraViewModel: ObservableObject {
     /// Recorded silently — ISO and shutter are not surfaced in the UI.
     private var lockedExposure: (iso: Float, shutterSeconds: Double)?
 
-    @Published var kelvin: Float
-    @Published var tint: Float
+    // Both push to the device on change, like every other live control. Without this
+    // the Kelvin slider and its presets did nothing until `lockExposure()` happened to
+    // apply them — you could not see the colour you were choosing, which is the whole
+    // point of the control in a fixed light box.
+    @Published var kelvin: Float {
+        didSet {
+            pushWhiteBalance()
+            persistDefaultsIfLoaded()
+        }
+    }
+    @Published var tint: Float {
+        didSet {
+            pushWhiteBalance()
+            persistDefaultsIfLoaded()
+        }
+    }
     @Published var exposureLocked = false
 
     // Focus
@@ -154,6 +168,10 @@ final class CameraViewModel: ObservableObject {
             syncPreviewSettings()
             await camera.start()
             applyExposureBias()
+            // The persisted colour temperature has to reach the device too, or the
+            // viewfinder opens on the camera's own guess while the panel shows the
+            // value from the last session.
+            pushWhiteBalance()
         } catch {
             report(error)
         }
@@ -183,20 +201,27 @@ final class CameraViewModel: ObservableObject {
 
     func selectLens(id: String) {
         guard let lens = lenses.first(where: { $0.id == id }) else { return }
+        // Claim the new lens before awaiting the hardware switch. `cycleLens()` derives
+        // the next lens from this value, so leaving it stale until the await returned
+        // meant two quick taps both computed the same target and the button advanced
+        // one step instead of two. Restored below if the switch fails.
+        let previousLensID = selectedLensID
+        selectedLensID = id
         Task {
             do {
                 try await camera.select(lens: lens)
-                selectedLensID = id
                 exposureLocked = false      // new module → re-set and re-lock exposure
                 nearAnchor = nil
                 farAnchor = nil
                 torchEnabled = false        // torch belongs to the previous device
                 applyExposureBias()         // metering bias is per-device
+                pushWhiteBalance()          // and so is white balance
                 // The new device defaults to continuous AF. Push the slider's value
                 // so the displayed focus actually matches the hardware; didSet won't
                 // fire because lensPosition itself hasn't changed.
                 try camera.setFocus(lensPosition: lensPosition)
             } catch {
+                selectedLensID = previousLensID
                 report(error)
             }
         }
@@ -209,19 +234,35 @@ final class CameraViewModel: ObservableObject {
         do { try camera.setExposureBias(evBias) } catch { report(error) }
     }
 
+    /// Applies the chosen colour temperature to the device. Called at slider rate, so
+    /// failures are swallowed rather than raised as an alert per tick — same reasoning
+    /// as `pushFocus()`. There is no continuous-auto WB path in this app: colour is
+    /// always the value shown in the panel.
+    private func pushWhiteBalance() {
+        try? camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+    }
+
     /// Freezes metering and white balance so every frame in the bracket matches.
     func lockExposure() {
         Task {
-            await camera.waitForExposureSettle()
             do {
-                lockedExposure = try camera.lockExposure()
-                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+                try await freezeExposureAndWhiteBalance()
                 exposureLocked = true
                 persistDefaults()
             } catch {
                 report(error)
             }
         }
+    }
+
+    /// Settle → lock → re-apply colour, in that order. Shared by the Lock button and by
+    /// `resumeSession()`, which has to redo exactly the same thing after iOS hands the
+    /// camera to another app: two copies of an order-sensitive sequence would eventually
+    /// drift apart.
+    private func freezeExposureAndWhiteBalance() async throws {
+        await camera.waitForExposureSettle()
+        lockedExposure = try camera.lockExposure()
+        try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
     }
 
     /// Returns to live metering so the EV slider takes effect again.
@@ -295,8 +336,11 @@ final class CameraViewModel: ObservableObject {
             try camera.setTorch(enabled: on)
             torchEnabled = on
         } catch {
+            // Leave the flag alone: it still describes the torch's actual state, since
+            // the change didn't happen. Forcing it to false here was right for a failed
+            // switch-on (where it was already false) but wrong for a failed switch-off,
+            // which would leave the torch lit while the icon claimed it was out.
             report(error)
-            if torchEnabled { torchEnabled = false }
         }
     }
 
@@ -410,15 +454,16 @@ final class CameraViewModel: ObservableObject {
     private func resumeSession() async {
         await camera.start()
         do {
+            try camera.setExposureBias(evBias)
             if exposureLocked {
                 // Re-freeze: iOS may have handed the camera to another app and reset
                 // the device while we were suspended.
-                try camera.setExposureBias(evBias)
-                await camera.waitForExposureSettle()
-                lockedExposure = try camera.lockExposure()
-                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+                try await freezeExposureAndWhiteBalance()
             } else {
-                try camera.setExposureBias(evBias)
+                // Colour is a manual setting either way, so it has to be restored even
+                // when exposure is live — otherwise a background trip silently reverts
+                // the light box's white balance to whatever the device decides.
+                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
             }
             try camera.setFocus(lensPosition: lensPosition)
         } catch {

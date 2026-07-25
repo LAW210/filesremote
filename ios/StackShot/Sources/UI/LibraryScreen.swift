@@ -49,18 +49,11 @@ struct LibraryScreen: View {
         }
     }
 
-    /// Mirrors `StackSet.captureSummary` (frames · EV · Kelvin) but appends the
-    /// library-specific "not stacked" suffix. ISO/shutter are never shown here —
-    /// the owner wants only what the photographer chose, not what the camera metered.
+    /// `StackSet.captureSummary` plus the library-specific "not stacked" suffix. It
+    /// delegates rather than re-deriving the line: a second copy of the format drifts
+    /// the moment the shared one changes, and nothing would flag it.
     private func librarySummary(for set: StackSet) -> String {
-        var segments = ["\(set.frames.count) frames"]
-        if let bias = set.exposure.evBias {
-            segments.append(String(format: "EV %+.1f", bias))
-        }
-        segments.append("\(Int(set.whiteBalance.kelvin))K")
-        var summary = segments.joined(separator: " · ")
-        if set.result == nil { summary += " · not stacked" }
-        return summary
+        set.captureSummary + (set.result == nil ? " · not stacked" : "")
     }
 
     private func thumbnailURL(for set: StackSet) -> URL? {
