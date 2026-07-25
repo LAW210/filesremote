@@ -33,6 +33,8 @@ struct StackSet: Codable, Identifiable {
         var mergedFileName: String
         var engine: String
         var processedAt: Date
+        /// Optional so manifests saved before the depth-map toggle still decode.
+        var depthMapFileName: String?
     }
 
     var id: UUID

@@ -32,5 +32,6 @@ enum AppConfig {
         /// the embedded C++ engine works at full resolution.
         static let fallbackMaxDimension: CGFloat = 2048
         static let mergedFileName = "stacked.heic"
+        static let depthMapFileName = "depthmap.heic"
     }
 }

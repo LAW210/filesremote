@@ -44,6 +44,7 @@ final class CameraViewModel: ObservableObject {
     @Published var stepCount = AppConfig.Bracket.defaultStepCount
     @Published var phase: Phase = .idle
     @Published var resultImage: UIImage?
+    @Published var depthMapImage: UIImage?
     @Published var lastSet: StackSet?
 
     var shutterSeconds: Double { 1.0 / shutterDenominator }
@@ -161,10 +162,11 @@ final class CameraViewModel: ObservableObject {
 
     func stack(set: StackSet) async throws {
         phase = .stacking(0)
-        let (updated, image) = try await stacking.stackAndPersist(set) { p in
+        let (updated, output) = try await stacking.stackAndPersist(set) { p in
             Task { @MainActor in self.phase = .stacking(p) }
         }
-        resultImage = image
+        resultImage = output.merged
+        depthMapImage = output.depthMap
         lastSet = updated
         phase = .done
     }
@@ -177,6 +179,7 @@ final class CameraViewModel: ObservableObject {
     func resetForNextStack() {
         phase = .idle
         resultImage = nil
+        depthMapImage = nil
     }
 
     // MARK: - Errors

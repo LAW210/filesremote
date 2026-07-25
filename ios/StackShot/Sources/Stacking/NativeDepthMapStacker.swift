@@ -14,7 +14,7 @@ final class NativeDepthMapStacker: StackEngine {
     /// Frames are downscaled to this max dimension for the draft to bound memory.
     private let maxDimension = AppConfig.Stacking.fallbackMaxDimension
 
-    func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> UIImage {
+    func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> StackOutput {
         guard !frameURLs.isEmpty else { throw StackEngineError.noFrames }
 
         let context = CIContext()
@@ -85,6 +85,27 @@ final class NativeDepthMapStacker: StackEngine {
                                provider: provider, decode: nil, shouldInterpolate: false,
                                intent: .defaultIntent)
         else { throw StackEngineError.engineFailed("could not build output image") }
+
+        let depthMap = depthMapImage(from: bestIndex, width: width, height: height, frameCount: frameURLs.count)
+        return StackOutput(merged: UIImage(cgImage: cg), depthMap: depthMap)
+    }
+
+    /// Renders the smoothed per-pixel source-frame index as a grayscale image:
+    /// near (frame 0) is dark, far (last frame) is bright.
+    private func depthMapImage(from bestIndex: [UInt8], width: Int, height: Int, frameCount: Int) -> UIImage? {
+        let denom = max(frameCount - 1, 1)
+        var gray = [UInt8](repeating: 0, count: width * height)
+        for p in 0..<gray.count {
+            gray[p] = UInt8(255 * Int(bestIndex[p]) / denom)
+        }
+        guard let provider = CGDataProvider(data: Data(gray) as CFData),
+              let cg = CGImage(width: width, height: height,
+                               bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width,
+                               space: CGColorSpaceCreateDeviceGray(),
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+                               provider: provider, decode: nil, shouldInterpolate: false,
+                               intent: .defaultIntent)
+        else { return nil }
         return UIImage(cgImage: cg)
     }
 

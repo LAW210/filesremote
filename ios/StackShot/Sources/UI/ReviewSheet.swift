@@ -5,17 +5,23 @@ struct ReviewSheet: View {
     @EnvironmentObject var vm: CameraViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var saved = false
+    @State private var showDepthMap = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-                if let image = vm.resultImage {
+                if let image = showDepthMap ? vm.depthMapImage : vm.resultImage {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
                     ProgressView("Stacking…")
+                }
+
+                if vm.depthMapImage != nil {
+                    Toggle("Depth", isOn: $showDepthMap)
+                        .toggleStyle(.button)
                 }
 
                 if let set = vm.lastSet {

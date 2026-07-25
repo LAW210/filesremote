@@ -55,6 +55,8 @@ struct LibraryScreen: View {
 struct StackSetDetail: View {
     @State var set: StackSet
     @State private var merged: UIImage?
+    @State private var depthMap: UIImage?
+    @State private var showDepthMap = false
     @State private var stacking = false
     @State private var errorText: String?
 
@@ -63,8 +65,8 @@ struct StackSetDetail: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                if let merged {
-                    Image(uiImage: merged)
+                if let image = (showDepthMap ? depthMap : nil) ?? merged {
+                    Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
                         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -72,6 +74,11 @@ struct StackSetDetail: View {
                     ProgressView("Stacking…")
                 } else {
                     Text("Not stacked yet").foregroundStyle(.secondary)
+                }
+
+                if depthMap != nil {
+                    Toggle("Depth", isOn: $showDepthMap)
+                        .toggleStyle(.button)
                 }
 
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -108,6 +115,7 @@ struct StackSetDetail: View {
 
     private func loadMerged() {
         merged = service.mergedImage(for: set)
+        depthMap = service.depthMapImage(for: set)
     }
 
     /// Same persistence path as the capture flow: the re-stacked result is written
@@ -117,9 +125,11 @@ struct StackSetDetail: View {
         errorText = nil
         Task {
             do {
-                let (updated, image) = try await service.stackAndPersist(set)
+                let (updated, output) = try await service.stackAndPersist(set)
                 set = updated
-                merged = image
+                merged = output.merged
+                depthMap = output.depthMap
+                if output.depthMap == nil { showDepthMap = false }
             } catch {
                 errorText = error.localizedDescription
             }
