@@ -9,7 +9,24 @@ struct FocusPanel: View {
         VStack(spacing: 10) {
             HStack {
                 Text("NEAR").font(.caption2)
+                Button {
+                    vm.lensPosition = min(max(vm.lensPosition - 0.005, 0), 1)
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .font(.title3)
+                .buttonRepeatBehavior(.enabled)
+
                 Slider(value: $vm.lensPosition, in: 0...1)
+
+                Button {
+                    vm.lensPosition = min(max(vm.lensPosition + 0.005, 0), 1)
+                } label: {
+                    Image(systemName: "plus.circle")
+                }
+                .font(.title3)
+                .buttonRepeatBehavior(.enabled)
+
                 Text("FAR").font(.caption2)
             }
 

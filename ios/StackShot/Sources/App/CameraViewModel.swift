@@ -64,6 +64,18 @@ final class CameraViewModel: ObservableObject {
         exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
     }
 
+    /// Current lens aperture (fixed per lens), for the live EV readout.
+    var currentAperture: Float? { camera.device?.lensAperture }
+
+    /// EV at ISO 100, computed from the live aperture and the current shutter/ISO settings.
+    var evReadout: Double? {
+        guard let aperture = camera.device?.lensAperture, aperture > 0 else { return nil }
+        let n = Double(aperture)
+        let t = shutterSeconds
+        let ev100 = log2((n * n) / t) - log2(Double(iso) / 100.0)
+        return ev100
+    }
+
     // MARK: - Lifecycle
 
     init() {

@@ -13,6 +13,12 @@ struct ExposurePanel: View {
             HistogramView(bins: vm.histogram)
                 .frame(height: 40)
 
+            if let ev = vm.evReadout, let aperture = vm.currentAperture {
+                Text(String(format: "EV₁₀₀ %+.1f  ·  f/%.1f", ev, aperture))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
             row("ISO \(Int(vm.iso))") {
                 Slider(value: $vm.iso, in: AppConfig.Exposure.isoRange, step: 25)
             }

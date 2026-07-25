@@ -9,6 +9,12 @@ import UIKit
 /// Runs on the camera's video queue; settings are written from the main thread, so all
 /// mutable state lives behind a lock and `process` works on an immutable snapshot.
 ///
+/// To keep the video queue cheap, only every 2nd frame is processed (callers already
+/// treat a nil result as "skip this frame"), and the viewfinder render is downscaled to
+/// the screen's pixel size. Peaking still runs once on the full-resolution frame — the
+/// loupe crops from that full-resolution peaked image, since judging critical focus is
+/// its whole purpose — and only the final viewfinder image is produced at screen scale.
+///
 /// v1 renders with Core Image; a Metal shader can replace `applyPeaking` without
 /// changing callers.
 final class PreviewFrameProcessor {
@@ -31,6 +37,8 @@ final class PreviewFrameProcessor {
     private let lock = NSLock()
     private var settings = Settings()
     private let context = CIContext(options: [.useSoftwareRenderer: false])
+    /// Every 2nd frame is skipped entirely to keep the video queue cheap.
+    private var frameCounter = 0
 
     /// Thread-safe settings mutation from any thread.
     func update(_ transform: (inout Settings) -> Void) {
@@ -39,6 +47,9 @@ final class PreviewFrameProcessor {
 
     /// Processes one frame using a consistent snapshot of the settings.
     func process(_ pixelBuffer: CVPixelBuffer) -> Output? {
+        frameCounter += 1
+        guard frameCounter % 2 == 0 else { return nil }
+
         let snapshot = lock.withLock { settings }
 
         let source = CIImage(cvPixelBuffer: pixelBuffer)
@@ -46,11 +57,20 @@ final class PreviewFrameProcessor {
             ? applyPeaking(to: source, threshold: snapshot.peakingThreshold)
             : source
 
-        guard let vfCG = context.createCGImage(composited, from: composited.extent) else { return nil }
+        // Downscale only the viewfinder render to the screen's pixel size; peaking
+        // above already ran once on the full-resolution frame.
+        let screenScale = min(1, (UIScreen.main.bounds.width * UIScreen.main.scale) / source.extent.width)
+        let displaySource = screenScale < 1
+            ? composited.transformed(by: .init(scaleX: screenScale, y: screenScale))
+            : composited
+
+        guard let vfCG = context.createCGImage(displaySource, from: displaySource.extent) else { return nil }
         let viewfinder = UIImage(cgImage: vfCG)
 
         var loupe: UIImage?
         if let center = snapshot.loupeCenter {
+            // Loupe samples from the full-resolution peaked image, not displaySource,
+            // so critical focus judgments aren't degraded by the viewfinder downscale.
             loupe = renderLoupe(from: composited, center: center,
                                 magnification: snapshot.loupeMagnification)
         }

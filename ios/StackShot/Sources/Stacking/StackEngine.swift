@@ -49,15 +49,15 @@ final class FocusStackCppEngine: StackEngine {
     func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> StackOutput {
         guard !frameURLs.isEmpty else { throw StackEngineError.noFrames }
         let paths = frameURLs.map(\.path)
-        let depthMapPath = NSTemporaryDirectory().appending("stackshot_depth.png")
-        // Clear any depth PNG left by a previous run so a file found after this run
-        // is guaranteed to have been written by this run, not a stale leftover.
-        try? FileManager.default.removeItem(atPath: depthMapPath)
+        // Unique per run, so concurrent/overlapping stacks never read back another
+        // run's stale or in-progress depth file — no pre-run delete needed.
+        let depthMapPath = NSTemporaryDirectory().appending("stackshot_depth_\(UUID().uuidString).png")
         let merged: UIImage = try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 var error: NSString?
                 let result = FocusStackBridge.stackImages(
                     atPaths: paths,
+                    depthMapPath: depthMapPath,
                     progress: { p in progress(p.doubleValue) },
                     error: &error)
                 if let result {
@@ -68,8 +68,10 @@ final class FocusStackCppEngine: StackEngine {
             }
         }
         // The C++ core writes its depth map alongside the merged result on a best-effort
-        // basis; its absence is non-fatal, we just show no depth toggle.
+        // basis; its absence is non-fatal, we just show no depth toggle. Clean up the
+        // unique-per-run file after reading it so tmp doesn't accumulate.
         let depthMap = UIImage(contentsOfFile: depthMapPath)
+        try? FileManager.default.removeItem(atPath: depthMapPath)
         return StackOutput(merged: merged, depthMap: depthMap)
     }
 }

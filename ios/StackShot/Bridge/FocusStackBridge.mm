@@ -12,8 +12,9 @@
 @implementation FocusStackBridge
 
 + (nullable UIImage *)stackImagesAtPaths:(NSArray<NSString *> *)paths
-                                progress:(void (^)(NSNumber *))progress
-                                   error:(NSString **)error {
+                             depthMapPath:(NSString *)depthMapPath
+                                 progress:(void (^)(NSNumber *))progress
+                                    error:(NSString **)error {
     // C++ try/catch: OpenCV and the stacking core throw C++ exceptions,
     // which Objective-C @try/@catch would NOT intercept.
     try {
@@ -23,15 +24,16 @@
             inputs.push_back(std::string(p.UTF8String));
         }
 
-        NSString *outPath = [NSTemporaryDirectory()
-            stringByAppendingPathComponent:@"stackshot_merged.png"];
+        // Derived from the caller-supplied (unique-per-run) depth map path rather than
+        // a fixed name, so the merged output is unique per run too without a second
+        // parameter.
+        NSString *outPath = [depthMapPath stringByAppendingString:@"_merged.png"];
 
         focusstack::FocusStack stack;
         stack.set_inputs(inputs);
         stack.set_output(std::string(outPath.UTF8String));
         // Per-pixel sharpest-source selection + depth map == Helicon Method-B analog.
-        stack.set_depthmap(std::string([NSTemporaryDirectory()
-            stringByAppendingPathComponent:@"stackshot_depth.png"].UTF8String));
+        stack.set_depthmap(std::string(depthMapPath.UTF8String));
         stack.set_align_flags(focusstack::FocusStack::ALIGN_DEFAULT);
 
         if (!stack.run()) {
@@ -59,8 +61,9 @@
 @implementation FocusStackBridge
 
 + (nullable UIImage *)stackImagesAtPaths:(NSArray<NSString *> *)paths
-                                progress:(void (^)(NSNumber *))progress
-                                   error:(NSString **)error {
+                             depthMapPath:(NSString *)depthMapPath
+                                 progress:(void (^)(NSNumber *))progress
+                                    error:(NSString **)error {
     if (error) *error = @"Engine not embedded — build with ENGINE_EMBEDDED after running scripts/fetch_engine.sh";
     return nil;
 }
