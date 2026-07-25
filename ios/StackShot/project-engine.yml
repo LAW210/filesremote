@@ -20,6 +20,8 @@ targets:
       - Bridge
       # Exclude the CLI entry point and every GoogleTest-dependent file — gtest is
       # never vendored, and both main.cc and gtest_main.cc define their own main().
+      # *.cl is excluded from COMPILATION only: task_wavelet_templates.hh #includes
+      # the kernels file as text, so it must not also hit Xcode's OpenCL build rule.
       - path: Vendor/focus-stack/src
         excludes:
           - "main.cc"
@@ -27,6 +29,7 @@ targets:
           - "*_tests.cc"
           - "*_test.cc"
           - "gtest*"
+          - "*.cl"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lawsecurity.stackshot
@@ -40,7 +43,9 @@ targets:
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Vendor/focus-stack/src"
         GCC_PREPROCESSOR_DEFINITIONS: "$(inherited) ENGINE_EMBEDDED=1"
     dependencies:
-      - framework: Vendor/opencv2.xcframework
+      # The OpenCV 4.9.0 iOS release ships a classic fat framework (device +
+      # simulator slices), not an xcframework.
+      - framework: Vendor/opencv2.framework
         embed: false
     info:
       path: Info.plist

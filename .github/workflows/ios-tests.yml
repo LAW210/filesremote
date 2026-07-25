@@ -80,7 +80,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ios/StackShot/Vendor
-          key: engine-vendor-opencv-4.9.0-v1
+          key: engine-vendor-opencv-4.9.0-v2
 
       - name: Fetch engine sources
         working-directory: ios/StackShot
@@ -92,12 +92,15 @@ jobs:
 
       - name: Build with engine embedded
         working-directory: ios/StackShot
+        # Device destination: opencv2.framework is a classic fat framework whose
+        # arm64 slice is a DEVICE slice — an arm64 simulator build would reject it.
+        # Build-only needs no signing.
         run: |
           set -o pipefail
           xcodebuild \
             -project StackShotEngine.xcodeproj \
             -scheme StackShot \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'generic/platform=iOS' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build

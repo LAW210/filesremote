@@ -3,9 +3,11 @@
 #   - PetteriAimonen/focus-stack (MIT) C++ sources
 #   - OpenCV iOS xcframework (Apache-2.0)
 # Run from ios/StackShot/. After it succeeds:
-#   1. Add Vendor/opencv2.xcframework to the Xcode target (embed & sign not required; static).
-#   2. Add Vendor/focus-stack/src/*.cc(.hh) to the target (exclude its main.cc CLI entry).
-#   3. Uncomment ENGINE_EMBEDDED flags in project.yml and re-run `xcodegen generate`.
+#   1. Add Vendor/opencv2.framework to the Xcode target (embed & sign not required; static).
+#   2. Add Vendor/focus-stack/src/*.cc(.hh) to the target (exclude main.cc, gtest files,
+#      and *.cl — the kernels file is #included by task_wavelet_templates.hh, not compiled).
+#   3. Uncomment ENGINE_EMBEDDED flags in project.yml and re-run `xcodegen generate`,
+#      or use project-engine.yml which wires all of this up already (CI uses it).
 set -euo pipefail
 
 VENDOR_DIR="$(cd "$(dirname "$0")/.." && pwd)/Vendor"
@@ -22,7 +24,9 @@ else
 fi
 
 echo "==> Fetching OpenCV ${OPENCV_VERSION} iOS framework (Apache-2.0)"
-if [ ! -d opencv2.xcframework ]; then
+# The release zip contains opencv2.framework (a classic fat framework with
+# device + simulator slices), NOT an xcframework.
+if [ ! -d opencv2.framework ]; then
   curl -L -o opencv-ios.zip \
     "https://github.com/opencv/opencv/releases/download/${OPENCV_VERSION}/opencv-${OPENCV_VERSION}-ios-framework.zip"
   unzip -q opencv-ios.zip
