@@ -7,7 +7,11 @@
 # bottom of this script for what to do once it finishes.
 set -euo pipefail
 
-VENDOR_DIR="$(cd "$(dirname "$0")/.." && pwd)/Vendor"
+# Resolve both paths up front, while $0's (possibly relative) directory is still
+# valid — this script cd's into Vendor/ below, after which "$(dirname "$0")/.."
+# no longer resolves when invoked as e.g. `scripts/fetch_engine.sh`.
+PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+VENDOR_DIR="$PROJECT_DIR/Vendor"
 OPENCV_VERSION="4.9.0"
 
 mkdir -p "$VENDOR_DIR"
@@ -35,8 +39,6 @@ fi
 echo "==> Copying license texts for the in-app Acknowledgements screen"
 mkdir -p licenses
 cp focus-stack/LICENSE licenses/focus-stack-MIT.txt 2>/dev/null || true
-
-PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 echo "==> Generating StackShotEngine.xcodeproj"
 if command -v xcodegen >/dev/null 2>&1; then
