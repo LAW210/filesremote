@@ -156,6 +156,22 @@ final class CameraService: NSObject {
         device.setWhiteBalanceModeLocked(with: gains)
     }
 
+    /// Locks white balance using the device's gray-world estimate. Point the camera at a
+    /// neutral gray/white card filling the frame first.
+    func lockNeutralWhiteBalance() throws -> (kelvin: Float, tint: Float) {
+        guard let device else { throw CameraError.noCamera }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        var gains = device.grayWorldDeviceWhiteBalanceGains
+        let maxGain = device.maxWhiteBalanceGain
+        gains.redGain = min(max(gains.redGain, 1), maxGain)
+        gains.greenGain = min(max(gains.greenGain, 1), maxGain)
+        gains.blueGain = min(max(gains.blueGain, 1), maxGain)
+        device.setWhiteBalanceModeLocked(with: gains)
+        let tt = device.temperatureAndTintValues(for: gains)
+        return (tt.temperature, tt.tint)
+    }
+
     func setFocus(lensPosition: Float) throws {
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()

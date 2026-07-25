@@ -127,6 +127,18 @@ final class CameraViewModel: ObservableObject {
 
     func unlockExposure() { exposureLocked = false }
 
+    /// Locks white balance from a neutral gray/white card filling the frame.
+    func lockGrayCardWB() {
+        do {
+            let result = try camera.lockNeutralWhiteBalance()
+            kelvin = min(max(result.kelvin, AppConfig.Exposure.kelvinRange.lowerBound), AppConfig.Exposure.kelvinRange.upperBound)
+            tint = min(max(result.tint, AppConfig.Exposure.tintRange.lowerBound), AppConfig.Exposure.tintRange.upperBound)
+            persistDefaults()
+        } catch {
+            report(error)
+        }
+    }
+
     // MARK: - Persistence
 
     private func persistDefaults() {

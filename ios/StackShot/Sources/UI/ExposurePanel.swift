@@ -36,8 +36,16 @@ struct ExposurePanel: View {
                         .font(.caption2)
                         .buttonStyle(.bordered)
                 }
+                Button("Gray card") { vm.lockGrayCardWB() }
+                    .font(.caption2)
+                    .buttonStyle(.bordered)
+                    .tint(.mint)
                 Spacer()
             }
+
+            Text("Gray card: fill the frame with a neutral card, then tap")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
 
             row(String(format: "Tint %+.0f", vm.tint)) {
                 Slider(value: $vm.tint, in: AppConfig.Exposure.tintRange, step: 1)

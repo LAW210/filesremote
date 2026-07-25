@@ -53,20 +53,26 @@ StackSet Codable incl. legacy-manifest fixture). Sweep: 2 unused imports removed
 drift fixed, 6 items logged as Technical Debt. Verification: clean, 0 retries. Tests are
 desk-verified only — first `xcodebuild test` run happens on the user's Mac.
 
-## Iteration 4 — Peaking control + gray-card white balance
+## Iteration 4 — Peaking control + gray-card white balance ✅
+Shipped: Peaking toggle in FocusPanel (bound to persisted setting from iter 2, closing
+that gap); CameraService.lockNeutralWhiteBalance() (gray-world gains → clamp → lock →
+Kelvin/tint readback); Gray card button + hint in ExposurePanel with sliders synced to
+the measured values. Verification: clean, 0 retries.
+
+## Iteration 5 — Cancel-safe cleanup + surfaced manifest errors (debt items 2 & 3)
 
 **Plan (finalized):**
-1. FocusPanel: add a "Peaking" toggle button (same `.toggleStyle(.button)` pattern as
-   the loupe toggle) bound to the persisted vm.peakingEnabled added in iteration 2.
-2. Gray-card WB: CameraService gains `func lockNeutralWhiteBalance() throws ->
-   (kelvin: Float, tint: Float)`: reads `device.grayWorldDeviceWhiteBalanceGains`,
-   clamps to maxWhiteBalanceGain, locks via setWhiteBalanceModeLocked, converts back
-   with `device.temperatureAndTintValues(for:)` and returns them.
-3. CameraViewModel: `func lockGrayCardWB()` calling the above, updating kelvin/tint
-   published values (so sliders reflect reality) and persisting.
-4. ExposurePanel: "Gray card" button beside the WB presets invoking it (with a short
-   footnote-style caption "Fill frame with a neutral card, then tap").
-5. Touch only FocusPanel.swift, ExposurePanel.swift, CameraService.swift,
-   CameraViewModel.swift.
+1. FocusBracketController.run: wrap the capture loop so that on ANY throw (including
+   cancellation) the partially written StackSet directory is deleted before rethrow
+   (frames captured so far are useless without the full bracket). Use a success flag +
+   defer, or do/catch → removeItem → rethrow. Manifest is only written on full success
+   (already true — keep it that way).
+2. StackStore.loadAll: return manifests that decode, but count failures; change the
+   signature to `loadAll() -> (sets: [StackSet], corruptCount: Int)` OR keep the
+   signature and add `corruptManifestCount()` — choose the tuple; update the single
+   call site (LibraryScreen) to show a footnote row "N stack(s) could not be read"
+   when corruptCount > 0.
+3. Touch only FocusBracketController.swift, StackSet.swift (StackStore), and
+   LibraryScreen.swift.
 
 **Status:** planned → implementing

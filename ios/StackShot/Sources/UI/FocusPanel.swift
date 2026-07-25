@@ -24,6 +24,13 @@ struct FocusPanel: View {
                 }
                 .toggleStyle(.button)
                 .tint(.yellow)
+
+                Toggle(isOn: $vm.peakingEnabled) {
+                    Label("Peaking", systemImage: "eye")
+                        .font(.caption)
+                }
+                .toggleStyle(.button)
+                .tint(.green)
             }
 
             HStack(spacing: 12) {
