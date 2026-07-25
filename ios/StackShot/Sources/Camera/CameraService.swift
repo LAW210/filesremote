@@ -88,9 +88,17 @@ final class CameraService: NSObject {
     }
 
     private func attach(lens: Lens) throws {
-        if let existing = videoInput { session.removeInput(existing) }
+        // Construct the new input before detaching the old one, and put the old one
+        // back if the new one turns out to be unusable — otherwise a failed lens
+        // switch commits a session with no video input at all (black viewfinder,
+        // no capture possible) while `videoInput` still points at a detached input.
         let input = try AVCaptureDeviceInput(device: lens.device)
-        guard session.canAddInput(input) else { throw CameraError.configurationFailed }
+        let previous = videoInput
+        if let previous { session.removeInput(previous) }
+        guard session.canAddInput(input) else {
+            if let previous, session.canAddInput(previous) { session.addInput(previous) }
+            throw CameraError.configurationFailed
+        }
         session.addInput(input)
         videoInput = input
         currentLens = lens
@@ -109,6 +117,13 @@ final class CameraService: NSObject {
 
     func stop() {
         sessionQueue.async {
+            // Once the session stops, a pending capture's delegate callback never
+            // arrives — its continuation would leak and hang the bracket forever
+            // (backgrounding mid-capture). Fail them explicitly first.
+            let pending = self.inFlightCaptures.values
+            self.inFlightCaptures.removeAll()
+            for cont in pending { cont.resume(throwing: CameraError.captureInterrupted) }
+
             if self.session.isRunning { self.session.stopRunning() }
         }
     }
@@ -234,6 +249,12 @@ final class CameraService: NSObject {
 
         let data = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, Error>) in
             sessionQueue.async {
+                // capturePhoto raises on a stopped session, so fail fast instead —
+                // this is the path a bracket retry takes after backgrounding.
+                guard self.session.isRunning else {
+                    cont.resume(throwing: CameraError.captureInterrupted)
+                    return
+                }
                 self.inFlightCaptures[settings.uniqueID] = cont
                 self.photoOutput.capturePhoto(with: settings, delegate: self)
             }
@@ -293,6 +314,7 @@ enum CameraError: LocalizedError {
     case noCamera
     case configurationFailed
     case captureFailed
+    case captureInterrupted
     case torchUnavailable
 
     var errorDescription: String? {
@@ -302,6 +324,7 @@ enum CameraError: LocalizedError {
         case .noCamera: return "No back camera found."
         case .configurationFailed: return "Could not configure the camera session."
         case .captureFailed: return "Photo capture failed."
+        case .captureInterrupted: return "Capture was interrupted — the camera stopped mid-bracket."
         case .torchUnavailable: return "This lens has no torch."
         }
     }

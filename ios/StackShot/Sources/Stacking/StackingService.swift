@@ -30,40 +30,48 @@ final class StackingService {
         let urls = set.frames.map { store.frameURL(set, $0) }
         let output = try await engine.stack(frameURLs: urls, progress: progress)
 
+        // Encoding failure must surface: silently returning a resultless set would
+        // look like success to the caller while nothing reached disk.
+        guard let data = encode(output.merged, as: outputFormat, describing: set) else {
+            throw StackEngineError.engineFailed(
+                "could not encode the stacked image as \(outputFormat.rawValue.uppercased())")
+        }
+
+        let directory = store.directory(for: set)
+        let fileName = outputFormat.mergedFileName
+        try data.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+
+        // A re-stack after switching formats would otherwise leave the previous
+        // format's file behind with the manifest pointing at the new one.
+        for other in AppConfig.Stacking.OutputFormat.allCases where other != outputFormat {
+            try? FileManager.default.removeItem(
+                at: directory.appendingPathComponent(other.mergedFileName))
+        }
+
+        var depthMapFileName: String?
+        if let depthData = output.depthMap?.pngData() {
+            let depthFileName = AppConfig.Stacking.depthMapFileName
+            try depthData.write(to: directory.appendingPathComponent(depthFileName),
+                                options: .atomic)
+            depthMapFileName = depthFileName
+        }
+
         var updated = set
-        if let data = encode(output.merged, as: outputFormat, describing: set) {
-            let fileName = outputFormat.mergedFileName
-            try data.write(to: store.directory(for: set).appendingPathComponent(fileName),
-                           options: .atomic)
+        updated.result = .init(mergedFileName: fileName,
+                               engine: engine.name,
+                               processedAt: Date(),
+                               depthMapFileName: depthMapFileName)
 
-            // A re-stack after switching formats would otherwise leave the previous
-            // format's file behind with the manifest pointing at the new one.
-            for other in AppConfig.Stacking.OutputFormat.allCases where other != outputFormat {
-                try? FileManager.default.removeItem(
-                    at: store.directory(for: set).appendingPathComponent(other.mergedFileName))
+        // Manifest first, frames second. If the manifest write fails (disk full is
+        // plausible right after writing a full-size image), the source frames must
+        // still exist — otherwise the set is stranded: no result to show and no
+        // frames to retry from.
+        try store.saveManifest(updated)
+
+        if deleteFramesAfter {
+            for frame in updated.frames {
+                try? FileManager.default.removeItem(at: store.frameURL(updated, frame))
             }
-
-            var depthMapFileName: String?
-            if let depthData = output.depthMap?.pngData() {
-                let depthFileName = AppConfig.Stacking.depthMapFileName
-                try depthData.write(to: store.directory(for: set).appendingPathComponent(depthFileName),
-                                    options: .atomic)
-                depthMapFileName = depthFileName
-            }
-
-            updated.result = .init(mergedFileName: fileName,
-                                   engine: engine.name,
-                                   processedAt: Date(),
-                                   depthMapFileName: depthMapFileName)
-
-            // Frames are deleted only after the merged file exists on disk.
-            if deleteFramesAfter {
-                for frame in updated.frames {
-                    try? FileManager.default.removeItem(at: store.frameURL(updated, frame))
-                }
-            }
-
-            try store.saveManifest(updated)
         }
         return (updated, output)
     }

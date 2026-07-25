@@ -57,7 +57,7 @@ struct ViewfinderScreen: View {
         }
         .sheet(isPresented: .init(
             get: { vm.phase == .done },
-            set: { if !$0 { vm.resetForNextStack() } })) {
+            set: { if !$0 { vm.dismissReview() } })) {
             ReviewSheet()
         }
     }

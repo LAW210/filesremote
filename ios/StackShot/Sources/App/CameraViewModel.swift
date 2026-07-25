@@ -165,6 +165,10 @@ final class CameraViewModel: ObservableObject {
                 nearAnchor = nil
                 farAnchor = nil
                 torchEnabled = false        // torch belongs to the previous device
+                // The new device defaults to continuous AF. Push the slider's value
+                // so the displayed focus actually matches the hardware; didSet won't
+                // fire because lensPosition itself hasn't changed.
+                try camera.setFocus(lensPosition: lensPosition)
             } catch {
                 report(error)
             }
@@ -259,6 +263,12 @@ final class CameraViewModel: ObservableObject {
 
     func captureStack() {
         guard let near = nearAnchor, let far = farAnchor, canCapture else { return }
+        // Clear the previous result here rather than on review dismissal, so the
+        // outgoing sheet keeps showing its image until it is actually gone.
+        resultImage = nil
+        depthMapImage = nil
+        resultSavedToPhotos = false
+
         let controller = FocusBracketController(camera: camera)
         bracket = controller
         let plan = FocusBracketController.Plan(near: near, far: far, stepCount: stepCount)
@@ -322,11 +332,12 @@ final class CameraViewModel: ObservableObject {
         lastSet.flatMap { stacking.mergedFileURL(for: $0) }
     }
 
-    func resetForNextStack() {
+    /// Called as the review sheet begins dismissing. Only the phase changes here:
+    /// clearing the result images now would swap the finished photo for a spinner
+    /// while the sheet is still animating away. The images are cleared when the next
+    /// capture starts instead.
+    func dismissReview() {
         phase = .idle
-        resultImage = nil
-        depthMapImage = nil
-        resultSavedToPhotos = false
     }
 
     /// Stops the capture session in the background and resumes it on return —

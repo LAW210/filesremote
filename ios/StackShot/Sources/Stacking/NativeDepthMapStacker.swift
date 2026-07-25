@@ -14,68 +14,59 @@ final class NativeDepthMapStacker: StackEngine {
     /// Frames are downscaled to this max dimension for the draft to bound memory.
     private let maxDimension = AppConfig.Stacking.fallbackMaxDimension
 
+    /// Two passes over the frames, decoding each one twice, so only a single frame is
+    /// ever resident. Holding all N frames plus all N sharpness maps at once cost
+    /// ~25 MB per frame — ~200 MB for the default 8 and ~500 MB at the 20-frame
+    /// maximum, which risks termination. Peak is now roughly 40 MB regardless of N.
     func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> StackOutput {
         guard !frameURLs.isEmpty else { throw StackEngineError.noFrames }
 
-        let context = CIContext()
-        var rgbaFrames: [vImage_Buffer] = []
-        var sharpness: [[Float]] = []
         var width = 0, height = 0
+        var bestValue: [Float] = []
+        var bestIndex: [UInt8] = []
 
-        defer { for buf in rgbaFrames { free(buf.data) } }
-
+        // Pass 1: accumulate the per-pixel sharpest-frame index.
         for (i, url) in frameURLs.enumerated() {
-            guard var ci = CIImage(contentsOf: url) else { throw StackEngineError.decodeFailed(url) }
-            let scale = min(1, maxDimension / max(ci.extent.width, ci.extent.height))
-            if scale < 1 { ci = ci.transformed(by: .init(scaleX: scale, y: scale)) }
-            guard let cg = context.createCGImage(ci, from: ci.extent) else {
-                throw StackEngineError.decodeFailed(url)
-            }
+            let buffer = try decodeFrame(at: url)
+            defer { free(buffer.data) }
 
-            var format = vImage_CGImageFormat(
-                bitsPerComponent: 8, bitsPerPixel: 32,
-                colorSpace: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue))!
-            var buffer = vImage_Buffer()
-            guard vImageBuffer_InitWithCGImage(&buffer, &format, nil, cg, vImage_Flags(kvImageNoFlags)) == kvImageNoError else {
-                throw StackEngineError.decodeFailed(url)
-            }
-            if rgbaFrames.isEmpty {
+            if i == 0 {
                 width = Int(buffer.width)
                 height = Int(buffer.height)
+                bestIndex = [UInt8](repeating: 0, count: width * height)
             } else if Int(buffer.width) != width || Int(buffer.height) != height {
-                free(buffer.data)
                 throw StackEngineError.engineFailed("frame size mismatch at index \(i)")
             }
-            rgbaFrames.append(buffer)
-            sharpness.append(sharpnessMap(of: buffer, width: width, height: height))
-            progress(0.7 * Double(i + 1) / Double(frameURLs.count))
-        }
 
-        // Per-pixel argmax over smoothed sharpness == the depth map.
-        let count = width * height
-        var bestIndex = [UInt8](repeating: 0, count: count)
-        var bestValue = sharpness[0]
-        for f in 1..<sharpness.count {
-            let map = sharpness[f]
-            for p in 0..<count where map[p] > bestValue[p] {
-                bestValue[p] = map[p]
-                bestIndex[p] = UInt8(f)
+            let map = sharpnessMap(of: buffer, width: width, height: height)
+            if i == 0 {
+                bestValue = map
+            } else {
+                for p in 0..<map.count where map[p] > bestValue[p] {
+                    bestValue[p] = map[p]
+                    bestIndex[p] = UInt8(i)
+                }
             }
+            progress(0.6 * Double(i + 1) / Double(frameURLs.count))
         }
+        bestValue = []      // no longer needed; release before the composite pass
         bestIndex = medianSmooth(bestIndex, width: width, height: height)
-        progress(0.85)
 
-        // Composite: copy each pixel from its selected source frame.
+        // Pass 2: re-decode each frame and copy only the pixels it won.
+        let count = width * height
         var out = [UInt8](repeating: 0, count: count * 4)
-        for p in 0..<count {
-            let src = rgbaFrames[Int(bestIndex[p])]
-            let row = p / width, col = p % width
-            let srcPtr = src.data.advanced(by: row * src.rowBytes + col * 4)
-                .assumingMemoryBound(to: UInt8.self)
-            for c in 0..<4 { out[p * 4 + c] = srcPtr[c] }
+        for (i, url) in frameURLs.enumerated() {
+            let buffer = try decodeFrame(at: url)
+            defer { free(buffer.data) }
+            let tag = UInt8(i)
+            for p in 0..<count where bestIndex[p] == tag {
+                let row = p / width, col = p % width
+                let srcPtr = buffer.data.advanced(by: row * buffer.rowBytes + col * 4)
+                    .assumingMemoryBound(to: UInt8.self)
+                for c in 0..<4 { out[p * 4 + c] = srcPtr[c] }
+            }
+            progress(0.6 + 0.4 * Double(i + 1) / Double(frameURLs.count))
         }
-        progress(1.0)
 
         guard let provider = CGDataProvider(data: Data(out) as CFData),
               let cg = CGImage(width: width, height: height,
@@ -88,6 +79,30 @@ final class NativeDepthMapStacker: StackEngine {
 
         let depthMap = depthMapImage(from: bestIndex, width: width, height: height, frameCount: frameURLs.count)
         return StackOutput(merged: UIImage(cgImage: cg), depthMap: depthMap)
+    }
+
+    /// Decodes one frame, downscaled to `maxDimension`, into a freshly allocated
+    /// premultiplied-RGBA buffer. The caller owns the buffer and must `free` its data.
+    private func decodeFrame(at url: URL) throws -> vImage_Buffer {
+        guard var ci = CIImage(contentsOf: url) else { throw StackEngineError.decodeFailed(url) }
+        let scale = min(1, maxDimension / max(ci.extent.width, ci.extent.height))
+        if scale < 1 { ci = ci.transformed(by: .init(scaleX: scale, y: scale)) }
+        // A fresh context per frame keeps Core Image's internal caches from holding
+        // every decoded frame alive for the duration of the stack.
+        guard let cg = CIContext().createCGImage(ci, from: ci.extent) else {
+            throw StackEngineError.decodeFailed(url)
+        }
+
+        var format = vImage_CGImageFormat(
+            bitsPerComponent: 8, bitsPerPixel: 32,
+            colorSpace: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue))!
+        var buffer = vImage_Buffer()
+        guard vImageBuffer_InitWithCGImage(&buffer, &format, nil, cg,
+                                           vImage_Flags(kvImageNoFlags)) == kvImageNoError else {
+            throw StackEngineError.decodeFailed(url)
+        }
+        return buffer
     }
 
     /// Renders the smoothed per-pixel source-frame index as a grayscale image:

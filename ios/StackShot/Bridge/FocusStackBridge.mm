@@ -42,11 +42,17 @@
 
         if (!stack.run()) {
             if (error) *error = @"focus-stack core returned failure";
+            [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
             return nil;
         }
+        // The core exposes no incremental progress hook, so this fires once on
+        // completion — callers should treat the value as done/not-done, not a ramp.
         if (progress) progress(@(1.0));
 
         UIImage *result = [UIImage imageWithContentsOfFile:outPath];
+        // Loaded into memory — drop the temp file rather than leaking one
+        // full-resolution PNG into tmp per stack.
+        [[NSFileManager defaultManager] removeItemAtPath:outPath error:nil];
         if (!result && error) *error = @"could not load merged output";
         return result;
     } catch (const std::exception &e) {
