@@ -37,10 +37,8 @@ final class CameraViewModel: ObservableObject {
             persistDefaultsIfLoaded()
         }
     }
-    /// What the camera is metering at right now — a readout, not a control.
-    @Published var meteredISO: Float?
-    @Published var meteredShutter: Double?
     /// The values exposure was locked at; these shot the frames and land in EXIF.
+    /// Recorded silently — ISO and shutter are not surfaced in the UI.
     private var lockedExposure: (iso: Float, shutterSeconds: Double)?
 
     @Published var kelvin: Float
@@ -98,15 +96,13 @@ final class CameraViewModel: ObservableObject {
     /// `UserDefaults` during `init`.
     private var isLoaded = false
 
-    var canCapture: Bool {
-        exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
+    /// Label for the lens button — the lens currently attached.
+    var currentLensName: String {
+        lenses.first { $0.id == selectedLensID }?.name ?? "—"
     }
 
-    /// Live metering readout, e.g. "ISO 100 · 1/125 s". Nil until the session runs.
-    var meteringSummary: String? {
-        guard let iso = meteredISO, let shutter = meteredShutter, shutter > 0 else { return nil }
-        let denominator = Int((1 / shutter).rounded())
-        return "ISO \(Int(iso)) · 1/\(denominator) s"
+    var canCapture: Bool {
+        exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
     }
 
     // MARK: - Lifecycle
@@ -136,10 +132,6 @@ final class CameraViewModel: ObservableObject {
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
                     self.histogram = output.histogram
-                    if !self.exposureLocked, let e = self.camera.currentExposure {
-                        self.meteredISO = e.iso
-                        self.meteredShutter = e.shutterSeconds
-                    }
                 }
             }
             syncPreviewSettings()
@@ -162,6 +154,14 @@ final class CameraViewModel: ObservableObject {
             $0.screenPointWidth = pointWidth
             $0.screenPixelWidth = pixelWidth
         }
+    }
+
+    /// Steps to the next available back camera. One button beats three chips when
+    /// there are only ever two or three lenses to choose between.
+    func cycleLens() {
+        guard lenses.count > 1 else { return }
+        let index = lenses.firstIndex { $0.id == selectedLensID } ?? -1
+        selectLens(id: lenses[(index + 1) % lenses.count].id)
     }
 
     func selectLens(id: String) {
@@ -197,11 +197,8 @@ final class CameraViewModel: ObservableObject {
         Task {
             await camera.waitForExposureSettle()
             do {
-                let settled = try camera.lockExposure()
+                lockedExposure = try camera.lockExposure()
                 try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
-                lockedExposure = settled
-                meteredISO = settled.iso
-                meteredShutter = settled.shutterSeconds
                 exposureLocked = true
                 persistDefaults()
             } catch {

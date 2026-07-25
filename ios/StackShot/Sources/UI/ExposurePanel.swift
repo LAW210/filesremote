@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Brightness and colour. The camera meters continuously and the EV slider biases it;
-/// ISO and shutter are shown as a readout because the camera chooses them. Locking
-/// freezes both exposure and white balance so every frame in a bracket matches.
+/// Brightness and colour — a setup step, not a shooting control. In a fixed light box
+/// these are dialled in once: EV biases the camera's metering, Lock then freezes it so
+/// every frame in a bracket matches. ISO and shutter are chosen by the camera and
+/// deliberately not surfaced; the histogram and the live preview show the result.
 struct ExposurePanel: View {
     @EnvironmentObject var vm: CameraViewModel
 
@@ -17,20 +18,6 @@ struct ExposurePanel: View {
                 Slider(value: $vm.evBias,
                        in: AppConfig.Exposure.evBiasRange,
                        step: AppConfig.Exposure.evBiasStep)
-            }
-
-            // What the camera settled on — informational, not adjustable.
-            HStack {
-                Text(vm.meteringSummary ?? "metering…")
-                    .font(.caption2)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if vm.evBias != 0 {
-                    Button("Reset EV") { vm.evBias = 0 }
-                        .font(.caption2)
-                        .buttonStyle(.bordered)
-                }
             }
 
             row("\(Int(vm.kelvin)) K") {

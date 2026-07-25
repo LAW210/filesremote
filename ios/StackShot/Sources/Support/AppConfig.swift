@@ -18,10 +18,11 @@ enum AppConfig {
     }
 
     enum Exposure {
-        /// Exposure compensation applied to the camera's own metering. The device
-        /// reports its own supported bias range; this is the slider's range, clamped
-        /// to the device's at apply time.
-        static let evBiasRange: ClosedRange<Float> = -3...3
+        /// Exposure compensation applied to the camera's own metering. Positive only:
+        /// a light box is mostly white field, so the meter reads it as overexposure and
+        /// darkens the subject — the correction is always upward. The device's own
+        /// supported range is applied as a second clamp at set time.
+        static let evBiasRange: ClosedRange<Float> = 0...3
         static let evBiasStep: Float = 1.0 / 3.0      // third-stop detents
         static let kelvinRange: ClosedRange<Float> = 2500...8000
         static let tintRange: ClosedRange<Float> = -50...50

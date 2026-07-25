@@ -23,9 +23,11 @@ Set your signing team, select your device, run.
 
 ## What works out of the box (once it compiles)
 
-- Lens picker (0.5x / 1x / Tele); **EV compensation** on the camera's own metering with a
-  **live luminance histogram** and an ISO/shutter readout; **Kelvin white balance** with
-  light-box presets + tint; one Lock that freezes both for the whole stack.
+- One **lens button** cycling the available back cameras; **EV compensation** (positive
+  only — a light box meters bright and darkens the subject) with a **live luminance
+  histogram**; **Kelvin white balance** with light-box presets + tint; one Lock that
+  freezes exposure and colour for the whole stack. ISO and shutter are the camera's to
+  choose and are deliberately not shown.
 - Manual focus slider with **focus peaking** (green edge overlay) and the **3× loupe**
   (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness.
 - **Set Near / Set Far** anchors → adjustable-count bracket (default 8, inclusive endpoints)
@@ -42,17 +44,18 @@ Set your signing team, select your device, run.
 - **Settings sheet** (gear icon): stacked output as **JPEG quality 95 (default — eBay and
   other listing sites accept JPEG, not HEIC)** or **PNG (lossless master, ~4–6× larger,
   for edit-then-export workflows)**.
-- **Torch toggle** in the focus panel for extra illumination (full brightness; resets on
-  lens switch).
+- **Torch** and **zebra** as corner icon buttons — occasional tools, checked when the
+  lighting or a reel's finish changes rather than during every shot.
 - **Files-app visibility**: the app's stacks are browsable in Files and over cable in
   Finder, for dragging masters straight into a desktop editor.
 - **Per-frame capture retry**: one transient AVFoundation failure no longer aborts (and
   deletes) the whole bracket.
 - **Sound-only capture feedback** — a tick per frame and a chime when the stack is done.
   Deliberately no haptics: vibration would shake the tripod during exposure.
-- **Zebra overlay** (toggle in the focus panel) paints blown highlights red in the live
-  preview — chrome in a light box clips easily, and clipped pixels can't be recovered
-  in the edit.
+- The **zebra overlay** paints blown highlights red. It earns its place because in a
+  light box the histogram is permanently pegged by the white backdrop, so only a
+  positional warning distinguishes "background clipping, fine" from "chrome rim
+  clipping, unrecoverable".
 - **EXIF on the stacked file** (capture date, device, ISO, shutter) via CGImageDestination,
   so outputs date and attribute correctly in Photos and editors.
 - **RAW frames are deleted automatically** once the stacked image is safely written —

@@ -71,24 +71,45 @@ struct ViewfinderScreen: View {
     }
 
     private var topBar: some View {
-        HStack {
-            // Lens picker chips
-            ForEach(vm.lenses) { lens in
-                Button(lens.name) { vm.selectLens(id: lens.id) }
-                    .buttonStyle(.bordered)
-                    .tint(vm.selectedLensID == lens.id ? .yellow : .white)
-            }
-            Spacer()
-            Label(vm.exposureLocked ? "Exposure locked" : "Metering live",
+        HStack(spacing: 10) {
+            // One button cycling the available back cameras, rather than a chip each.
+            Button(vm.currentLensName) { vm.cycleLens() }
+                .buttonStyle(.bordered)
+                .tint(.yellow)
+                .disabled(vm.lenses.count < 2)
+
+            Label(vm.exposureLocked ? "Locked" : "Live",
                   systemImage: vm.exposureLocked ? "lock.fill" : "lock.open")
                 .font(.caption)
                 .foregroundStyle(vm.exposureLocked ? .green : .orange)
+
+            Spacer()
+
+            // Occasional tools live here as icons: checked when the lighting or the
+            // reel's finish changes, ignored the rest of the time.
+            Button {
+                vm.zebraEnabled.toggle()
+            } label: {
+                Image(systemName: "exclamationmark.triangle")
+            }
+            .tint(vm.zebraEnabled ? .red : .white)
+            .accessibilityLabel("Highlight clipping warning")
+
+            Button {
+                vm.setTorch(!vm.torchEnabled)
+            } label: {
+                Image(systemName: vm.torchEnabled ? "bolt.fill" : "bolt.slash")
+            }
+            .tint(vm.torchEnabled ? .orange : .white)
+            .accessibilityLabel("Torch")
+
             NavigationLink {
                 LibraryScreen()
             } label: {
                 Image(systemName: "photo.stack")
             }
             .tint(.white)
+
             Button {
                 showSettings = true
             } label: {
