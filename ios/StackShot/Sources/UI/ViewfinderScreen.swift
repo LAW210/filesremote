@@ -244,7 +244,7 @@ struct CaptureButton: View {
             .disabled(!vm.canCapture)
             .accessibilityLabel("Capture focus stack")
 
-            if let hint = disabledReason {
+            if let hint = vm.captureBlockedReason {
                 Text(hint)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -255,28 +255,6 @@ struct CaptureButton: View {
         }
     }
 
-    /// Names only the preconditions `vm.canCapture` is still missing, so the shutter
-    /// never reads as simply broken.
-    private var disabledReason: String? {
-        guard !vm.canCapture else { return nil }
-        var parts: [String] = []
-        if !vm.exposureLocked {
-            parts.append("Lock exposure")
-        }
-        switch (vm.nearAnchor, vm.farAnchor) {
-        case let (.some(near), .some(far)) where near == far:
-            parts.append("Near and Far must differ")
-        case (.none, .none):
-            parts.append("Set Near and Far")
-        case (.none, .some):
-            parts.append("Set Near")
-        case (.some, .none):
-            parts.append("Set Far")
-        default:
-            break
-        }
-        return parts.joined(separator: " · ")
-    }
 }
 
 /// Unmissable flag that the viewfinder is showing synthetic frames rather than a real

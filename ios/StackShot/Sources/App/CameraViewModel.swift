@@ -110,7 +110,15 @@ final class CameraViewModel: ObservableObject {
     }
 
     var canCapture: Bool {
-        exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
+        CaptureReadiness.canCapture(exposureLocked: exposureLocked,
+                                    near: nearAnchor, far: farAnchor)
+    }
+
+    /// Why the shutter is disabled, or nil when it isn't — same decision as
+    /// `canCapture`, so the button and its caption can never contradict each other.
+    var captureBlockedReason: String? {
+        CaptureReadiness.blockedReason(exposureLocked: exposureLocked,
+                                       near: nearAnchor, far: farAnchor)
     }
 
     // MARK: - Lifecycle
