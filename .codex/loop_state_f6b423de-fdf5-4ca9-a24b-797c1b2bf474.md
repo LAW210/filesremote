@@ -2,7 +2,7 @@
 
 - Session UUID: f6b423de-fdf5-4ca9-a24b-797c1b2bf474
 - Target codebase: `ios/StackShot/`
-- Iterations: 6 total · Current: 2
+- Iterations: 6 total · Current: 6 — TERMINATED (all iterations complete)
 - Environment notes: no Swift toolchain in container — the verification agent performs
   static analysis / desk verification, not executed tests. Planning skill
   `$plan-unblocked-improvements` is unreachable (macOS-local path); replaced by an
@@ -64,17 +64,30 @@ Shipped: partial StackSet directories deleted on any bracket failure/cancel
 orange warning row when stacks can't be read. Debt items 2 & 3 resolved.
 Verification: clean, 0 retries.
 
-## Iteration 6 (final) — Permission errors, docs sync + maintenance sweep (6 % 3 == 0)
+## Iteration 6 (final) — Permission errors, docs sync + maintenance sweep ✅
+Shipped: CameraError.permissionRestricted with distinct .restricted/.denied handling
+(debt item 4 resolved); README synced to all loop-shipped features + "Running tests"
+section. Sweep #2: zero findings. Verification: 1 WARN (README wording overpromised the
+corrupt-stack check), fixed in retry 1/3.
 
-**Plan (finalized):**
-1. Debt item 4: CameraError gains `.permissionRestricted`; CameraService.configure
-   distinguishes .restricted (parental controls / MDM) from .denied with distinct
-   user-facing messages.
-2. Docs sync: ios/StackShot/README.md — document the features shipped by the loop
-   (depth-map toggle, persisted settings, peaking toggle, gray-card WB, corrupt-stack
-   warning, cancel cleanup, test target + how to run tests) and refresh the gaps list.
-3. Maintenance sweep #2 (passive): re-scan only files changed in iterations 4–5 for
-   unused imports/typos/doc drift; log complex issues as Technical Debt.
-4. Terminate loop; output final summary (shipped / technical debt / skipped).
+---
 
-**Status:** planned → implementing
+# FINAL SUMMARY (loop terminated after 6/6 iterations)
+
+**Shipped:** depth-map export + view toggle (both engines); persisted capture settings
+(CaptureDefaults, clamped); StackShotTests target + 3 XCTest suites; peaking on/off
+control; one-tap gray-card white balance; cancel-safe bracket cleanup; corrupt-manifest
+warning in Library; restricted-vs-denied camera permission errors; 2 maintenance sweeps
+(unused imports, doc drift); README synced.
+
+**Technical debt (open):** fallback stacker has no frame alignment (by design — C++
+engine supplies ECC); C++ engine depth-map tmp path races under concurrent stacking;
+per-frame CPU histogram on the video queue is a potential throughput bottleneck.
+Resolved during loop: orphaned-frames cleanup (iter 5), silent corrupt manifests
+(iter 5), permission-state collapse (iter 6).
+
+**Skipped:** none — no iteration hit retry exhaustion, ambiguity, or high-risk changes,
+so the pause conditions were never triggered. Substitutions (declared up front): the
+macOS-local planning skill was replaced by inline planning; "5.6 Sol/Terra" agents ran
+as Sonnet at medium effort; verification was static analysis, since no Swift toolchain
+exists in this container — tests execute for the first time on the user's Mac.

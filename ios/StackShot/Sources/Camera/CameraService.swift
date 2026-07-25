@@ -31,7 +31,7 @@ final class CameraService: NSObject {
     // MARK: - Setup
 
     func configure() async throws {
-        guard await requestPermission() else { throw CameraError.permissionDenied }
+        try await ensurePermission()
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
                 do {
@@ -222,11 +222,20 @@ final class CameraService: NSObject {
         return (data, isRAW)
     }
 
-    private func requestPermission() async -> Bool {
+    private func ensurePermission() async throws {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized: return true
-        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .video)
-        default: return false
+        case .authorized:
+            return
+        case .notDetermined:
+            if !(await AVCaptureDevice.requestAccess(for: .video)) {
+                throw CameraError.permissionDenied
+            }
+        case .restricted:
+            throw CameraError.permissionRestricted
+        case .denied:
+            throw CameraError.permissionDenied
+        @unknown default:
+            throw CameraError.permissionDenied
         }
     }
 }
@@ -261,6 +270,7 @@ extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {
 
 enum CameraError: LocalizedError {
     case permissionDenied
+    case permissionRestricted
     case noCamera
     case configurationFailed
     case captureFailed
@@ -268,6 +278,7 @@ enum CameraError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionDenied: return "Camera permission was denied."
+        case .permissionRestricted: return "Camera access is restricted (parental controls or device management)."
         case .noCamera: return "No back camera found."
         case .configurationFailed: return "Could not configure the camera session."
         case .captureFailed: return "Photo capture failed."

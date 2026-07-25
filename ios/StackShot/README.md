@@ -31,6 +31,23 @@ Set your signing team, select your device, run.
   **Acknowledgements screen** for the shipped licenses.
 - A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
   no alignment) so the end-to-end flow works before the C++ engine is wired in.
+- **Depth-map view toggle** in the review/library UI to inspect the per-pixel source map.
+- **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off)
+  carried across app launches.
+- **Peaking on/off button** alongside the existing focus peaking overlay.
+- **One-tap gray-card white balance** lock using the device's gray-world estimate.
+- **Corrupt-stack warning** in the library when a StackSet's manifest fails to decode.
+- **Automatic cleanup** of failed or cancelled brackets so partial captures don't linger on disk.
+
+## Running tests
+
+```bash
+xcodegen generate
+```
+
+then open `StackShot.xcodeproj` in Xcode and run the StackShot scheme's tests with **⌘U**.
+Unit tests cover bracket spacing, settings persistence, and manifest coding. They are
+desk-verified only so far — this is the first time they'll actually execute, on the Mac.
 
 ## Embedding the real engine (focus-stack + OpenCV)
 
@@ -52,11 +69,8 @@ against the checkout, as noted in the file.
 
 ## Known first-draft gaps
 
-- Not yet compiled on a Mac — the code has been desk-audited (dependency APIs verified against
-  upstream focus-stack headers; C++ exception handling, connection rotation, and framework
-  imports fixed), but expect the possibility of minor first-build fixes.
-- The RAW DNG frames are stacked via CIImage decode in the fallback engine; the C++ path
-  should read the DNGs directly.
-- Depth-map export toggle not yet surfaced in UI (the C++ engine already writes one to tmp).
-- The fallback stacker is CPU-bound (~seconds per stack at 2048 px); the embedded engine
-  replaces it for production quality and speed.
+- The fallback stacker is CPU-bound (~seconds per stack at 2048 px) and does no alignment;
+  the embedded C++ engine replaces it for production quality and speed.
+- The C++ engine is not yet vendored by default — see "Embedding the real engine" above.
+- Loupe LiDAR distance readout is not implemented.
+- Diopter (macro) spacing is deferred.
