@@ -163,6 +163,14 @@ final class StackingService {
         return store.directory(for: set).appendingPathComponent(result.mergedFileName)
     }
 
+    /// URL of the capture log on disk, if one was actually written for this set — a
+    /// failed bracket or a set captured before logging existed has none, so callers
+    /// must not assume the file is there just because the set is.
+    func captureLogURL(for set: StackSet) -> URL? {
+        let url = store.directory(for: set).appendingPathComponent("capture-log.txt")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     /// Adds the merged file to the photo library AS-IS — the exact encoded bytes go in,
     /// with no decode/re-encode pass, so the quality-95 JPEG is never compressed twice.
     func saveFileToPhotos(_ url: URL) async throws {

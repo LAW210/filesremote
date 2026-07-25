@@ -59,8 +59,8 @@ struct FocusPanel: View {
                              action: vm.markFar)
             }
 
-            if let near = vm.nearAnchor, let far = vm.farAnchor {
-                plannedStepsStrip(near: near, far: far)
+            if vm.nearAnchor != nil || vm.farAnchor != nil {
+                plannedStepsStrip(near: vm.nearAnchor, far: vm.farAnchor)
             }
         }
         .foregroundStyle(.white)
@@ -80,24 +80,54 @@ struct FocusPanel: View {
     }
 
     /// Visualizes the planned focus planes: frame 1 = near anchor, frame N = far anchor.
-    private func plannedStepsStrip(near: Float, far: Float) -> some View {
-        let plan = FocusBracketController.Plan(near: near, far: far, stepCount: vm.stepCount)
-        return GeometryReader { geo in
+    ///
+    /// Renders as soon as either anchor is set, so there's feedback while placing the
+    /// first one (the most delicate part of the workflow) — not just once both exist.
+    /// Step dots require both endpoints (spacing is undefined with only one), so a lone
+    /// anchor shows its own marker plus a hollow placeholder for the still-missing end.
+    private func plannedStepsStrip(near: Float?, far: Float?) -> some View {
+        GeometryReader { geo in
+            let width = geo.size.width
             ZStack(alignment: .leading) {
                 Capsule().fill(.white.opacity(0.2)).frame(height: 4)
-                ForEach(Array(plan.positions.enumerated()), id: \.offset) { _, pos in
-                    Circle()
-                        .fill(.yellow)
-                        .frame(width: 8, height: 8)
-                        .offset(x: CGFloat(pos) * (geo.size.width - 8))
+
+                if let near, let far {
+                    let plan = FocusBracketController.Plan(near: near, far: far, stepCount: vm.stepCount)
+                    ForEach(Array(plan.positions.enumerated()), id: \.offset) { _, pos in
+                        Circle()
+                            .fill(.yellow)
+                            .frame(width: 8, height: 8)
+                            .offset(x: CGFloat(pos) * (width - 8))
+                    }
+                } else if let near {
+                    stripMarker(.green, x: CGFloat(near) * (width - 8))
+                    pendingMarker(x: CGFloat(near) < (width - 8) / 2 ? width - 8 : 0)
+                } else if let far {
+                    stripMarker(.green, x: CGFloat(far) * (width - 8))
+                    pendingMarker(x: CGFloat(far) < (width - 8) / 2 ? width - 8 : 0)
                 }
+
                 // Current focus position marker
                 Rectangle()
                     .fill(.cyan)
                     .frame(width: 2, height: 14)
-                    .offset(x: CGFloat(vm.lensPosition) * (geo.size.width - 2))
+                    .offset(x: CGFloat(vm.lensPosition) * (width - 2))
             }
         }
         .frame(height: 16)
+    }
+
+    /// A placed anchor's marker on the strip.
+    private func stripMarker(_ color: Color, x: CGFloat) -> some View {
+        Circle().fill(color).frame(width: 8, height: 8).offset(x: x)
+    }
+
+    /// Hollow stand-in for the anchor that hasn't been set yet — no real position to
+    /// show, just a cue that a second tap is still needed.
+    private func pendingMarker(x: CGFloat) -> some View {
+        Circle()
+            .strokeBorder(.white.opacity(0.4), lineWidth: 1.5)
+            .frame(width: 8, height: 8)
+            .offset(x: x)
     }
 }

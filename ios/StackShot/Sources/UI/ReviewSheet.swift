@@ -10,6 +10,12 @@ struct ReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showDepthMap = false
 
+    /// Dark = near, light = far. Explains what the greyscale map means and what to do
+    /// about it — shared verbatim with `StackSetDetail`'s depth map.
+    static let depthMapHint =
+        "Dark = near frame, light = far frame. Smooth gradation means good coverage; " +
+        "flat bands or patches mean adjacent steps didn't overlap — add frames or tighten Near/Far."
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
@@ -25,6 +31,13 @@ struct ReviewSheet: View {
                 if vm.depthMapImage != nil {
                     Toggle("Depth", isOn: $showDepthMap)
                         .toggleStyle(.button)
+                }
+
+                if showDepthMap {
+                    Text(Self.depthMapHint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
 
                 if let set = vm.lastSet {

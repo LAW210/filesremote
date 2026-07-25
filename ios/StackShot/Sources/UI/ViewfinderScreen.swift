@@ -44,6 +44,9 @@ struct ViewfinderScreen: View {
 
             VStack {
                 topBar
+                if vm.isPreviewMode {
+                    PreviewModeBadge()
+                }
                 Spacer()
                 if case .idle = vm.phase {
                     controls
@@ -135,9 +138,16 @@ struct ViewfinderScreen: View {
                     showExposurePanel.toggle()
                     showFocusPanel = !showExposurePanel
                 } label: {
-                    Image(systemName: "plusminus.circle")
-                        .font(.title)
+                    // Names the panel a tap would switch TO, not the one showing now.
+                    VStack(spacing: 2) {
+                        Image(systemName: showExposurePanel ? "camera.metering.center.weighted" : "plusminus.circle")
+                            .font(.title3)
+                        Text(showExposurePanel ? "Focus" : "Exposure")
+                            .font(.caption2)
+                    }
+                    .frame(width: 56)
                 }
+                .accessibilityLabel(showExposurePanel ? "Switch to focus panel" : "Switch to exposure panel")
 
                 CaptureButton()
 
@@ -220,16 +230,65 @@ struct CaptureButton: View {
     @EnvironmentObject var vm: CameraViewModel
 
     var body: some View {
-        Button(action: vm.captureStack) {
-            ZStack {
-                Circle().stroke(.white, lineWidth: 4).frame(width: 72, height: 72)
-                Circle()
-                    .fill(vm.canCapture ? .white : .gray)
-                    .frame(width: 60, height: 60)
+        VStack(spacing: 4) {
+            Button(action: vm.captureStack) {
+                ZStack {
+                    Circle().stroke(.white, lineWidth: 4).frame(width: 72, height: 72)
+                    Circle()
+                        .fill(vm.canCapture ? .white : .gray)
+                        .frame(width: 60, height: 60)
+                }
+            }
+            .disabled(!vm.canCapture)
+            .accessibilityLabel("Capture focus stack")
+
+            if let hint = disabledReason {
+                Text(hint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 150)
             }
         }
-        .disabled(!vm.canCapture)
-        .accessibilityLabel("Capture focus stack")
+    }
+
+    /// Names only the preconditions `vm.canCapture` is still missing, so the shutter
+    /// never reads as simply broken.
+    private var disabledReason: String? {
+        guard !vm.canCapture else { return nil }
+        var parts: [String] = []
+        if !vm.exposureLocked {
+            parts.append("Lock exposure")
+        }
+        switch (vm.nearAnchor, vm.farAnchor) {
+        case let (.some(near), .some(far)) where near == far:
+            parts.append("Near and Far must differ")
+        case (.none, .none):
+            parts.append("Set Near and Far")
+        case (.none, .some):
+            parts.append("Set Near")
+        case (.some, .none):
+            parts.append("Set Far")
+        default:
+            break
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// Unmissable flag that the viewfinder is showing synthetic frames rather than a real
+/// camera feed — only true on Simulator, where a good-looking frame could otherwise be
+/// mistaken for real capture output.
+struct PreviewModeBadge: View {
+    var body: some View {
+        Text("PREVIEW · no camera")
+            .font(.caption2)
+            .fontWeight(.bold)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(.red, in: Capsule())
+            .foregroundStyle(.white)
     }
 }
 

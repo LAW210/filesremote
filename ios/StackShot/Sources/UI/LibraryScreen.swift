@@ -96,6 +96,13 @@ struct StackSetDetail: View {
                         .toggleStyle(.button)
                 }
 
+                if showDepthMap {
+                    Text(ReviewSheet.depthMapHint)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
                 Text(set.captureSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -114,6 +121,16 @@ struct StackSetDetail: View {
                         ShareLink(item: url)
                             .buttonStyle(.bordered)
                     }
+                }
+
+                // Diagnostic, not a primary action: kept visually secondary to the
+                // Save/Share row above, and only offered when a log actually exists.
+                if let logURL = service.captureLogURL(for: set) {
+                    ShareLink(item: logURL) {
+                        Label("Capture log", systemImage: "doc.text")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
 
                 if let errorText {

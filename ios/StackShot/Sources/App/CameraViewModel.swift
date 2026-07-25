@@ -28,6 +28,10 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var loupeCenter = CGPoint(x: 0.5, y: 0.5)
     @Published var histogram: [Float] = []
     @Published var errorMessage: String?
+    /// True when `CameraService` fell back to synthetic preview frames because no
+    /// physical camera was found (the Simulator). Read by the UI layer to draw a
+    /// badge — the only contract between this view model and that badge.
+    @Published private(set) var isPreviewMode = false
 
     // Lens
     @Published var lenses: [CameraService.Lens] = []
@@ -128,6 +132,7 @@ final class CameraViewModel: ObservableObject {
     func start() async {
         do {
             try await camera.configure()
+            isPreviewMode = camera.isPreviewMode
             lenses = camera.lenses
             selectedLensID = camera.currentLens?.id
             camera.onPreviewFrame = { [weak self] buffer in
@@ -380,10 +385,11 @@ final class CameraViewModel: ObservableObject {
             // from claiming it is still on.
             if torchEnabled { torchEnabled = false }
         case .active:
-            // Only once the session is configured (lenses discovered) — the initial
-            // .active at launch fires before configure() completes, and start()
-            // handles that case itself.
-            guard !lenses.isEmpty else { return }
+            // Only once the camera is configured — the initial .active at launch fires
+            // before configure() completes, and start() handles that case itself.
+            // Preview mode has no lenses by definition, so it can't be gated on those;
+            // it still needs its synthetic frame timer restarted.
+            guard !lenses.isEmpty || isPreviewMode else { return }
             Task { await resumeSession() }
         default:
             break

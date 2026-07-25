@@ -21,6 +21,20 @@ final class CameraService: NSObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
 
+    /// True when `configureOnQueue()` found no back camera at all — the iOS Simulator,
+    /// which has no camera hardware. Rather than leave the whole UI stuck behind a
+    /// spinner, the service falls back to synthetic preview frames and no-op manual
+    /// controls so the app (and its layout, at true size) can be judged before the
+    /// owner is ready to test on a physical phone. Never true on a device with a
+    /// camera — `configureOnQueue()` only sets it when discovery finds zero devices.
+    private(set) var isPreviewMode = false
+    /// Simulator-only scaffolding: drives `onPreviewFrame` while in preview mode.
+    /// Cancelled by `stop()`, same as the real session would be.
+    private var previewTimer: DispatchSourceTimer?
+    /// Simulator-only scaffolding: a single synthetic BGRA frame, drawn once and
+    /// replayed. See `makeSyntheticPreviewBuffer()` for what it contains and why.
+    private lazy var previewPixelBuffer: CVPixelBuffer? = Self.makeSyntheticPreviewBuffer()
+
     /// Latest preview frame, used by peaking and the loupe. Updated on videoQueue.
     var onPreviewFrame: ((CVPixelBuffer) -> Void)?
 
@@ -50,6 +64,17 @@ final class CameraService: NSObject {
         let discovery = AVCaptureDevice.DiscoverySession(
             deviceTypes: [.builtInUltraWideCamera, .builtInWideAngleCamera, .builtInTelephotoCamera],
             mediaType: .video, position: .back)
+
+        // Simulator-only scaffolding: the Simulator reports zero back cameras (it has
+        // none), whereas any real device this ships on has at least one. Drop into
+        // preview mode instead of throwing `.noCamera`, so the UI is reachable without
+        // a physical phone. No session/input/output configuration happens below.
+        guard !discovery.devices.isEmpty else {
+            isPreviewMode = true
+            lenses = []
+            return
+        }
+
         lenses = discovery.devices.map { device in
             let name: String
             switch device.deviceType {
@@ -125,6 +150,10 @@ final class CameraService: NSObject {
     /// Starts the session and returns once it is actually running, so callers can
     /// safely re-apply device configuration (locks, torch) immediately afterwards.
     func start() async {
+        if isPreviewMode {
+            startPreviewTimer()
+            return
+        }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             sessionQueue.async {
                 if !self.session.isRunning { self.session.startRunning() }
@@ -134,6 +163,11 @@ final class CameraService: NSObject {
     }
 
     func stop() {
+        if isPreviewMode {
+            previewTimer?.cancel()
+            previewTimer = nil
+            return
+        }
         sessionQueue.async {
             // Once the session stops, a pending capture's delegate callback never
             // arrives — its continuation would leak and hang the bracket forever
@@ -144,6 +178,20 @@ final class CameraService: NSObject {
 
             if self.session.isRunning { self.session.stopRunning() }
         }
+    }
+
+    /// Simulator-only scaffolding: emits the synthetic frame on `videoQueue` at ~15 fps,
+    /// through the same `onPreviewFrame` closure the real capture delegate uses, so the
+    /// rest of the pipeline (peaking, zebra, histogram, loupe) can't tell the difference.
+    private func startPreviewTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: videoQueue)
+        timer.schedule(deadline: .now(), repeating: 1.0 / 15.0)
+        timer.setEventHandler { [weak self] in
+            guard let self, let buffer = self.previewPixelBuffer else { return }
+            self.onPreviewFrame?(buffer)
+        }
+        timer.resume()
+        previewTimer = timer
     }
 
     func select(lens: Lens) async throws {
@@ -169,6 +217,9 @@ final class CameraService: NSObject {
 
     /// What the camera is currently metering at — shown live, and recorded once locked.
     var currentExposure: (iso: Float, shutterSeconds: Double)? {
+        // Simulator-only scaffolding: a plausible-looking reading (100 ISO, 1/60s) so
+        // the exposure readout has something to show with no real device to meter.
+        if isPreviewMode { return (100, 1.0 / 60.0) }
         guard let device else { return nil }
         return (device.iso, CMTimeGetSeconds(device.exposureDuration))
     }
@@ -177,6 +228,8 @@ final class CameraService: NSObject {
     /// metering continuously, so the preview shows the result immediately. Nothing is
     /// frozen until `lockExposure()`.
     func setExposureBias(_ ev: Float) throws {
+        // Simulator-only scaffolding: succeed silently, there is no metering to bias.
+        if isPreviewMode { return }
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
@@ -190,6 +243,9 @@ final class CameraService: NSObject {
     /// Waits for metering to stop hunting, so a lock captures a settled value rather
     /// than whatever the algorithm happened to be passing through.
     func waitForExposureSettle(timeout: TimeInterval = 1.5) async {
+        // Simulator-only scaffolding: nothing is metering, so there is nothing to wait
+        // for — return immediately as if it had already settled.
+        if isPreviewMode { return }
         guard let device else { return }
         let deadline = Date().addingTimeInterval(timeout)
         var stableTicks = 0
@@ -209,6 +265,9 @@ final class CameraService: NSObject {
     /// values the camera settled on, for the manifest and EXIF.
     @discardableResult
     func lockExposure() throws -> (iso: Float, shutterSeconds: Double) {
+        // Simulator-only scaffolding: report a plausible fixed reading instead of
+        // locking real hardware, so the exposure panel can be exercised end to end.
+        if isPreviewMode { return (100, 1.0 / 60.0) }
         guard let device else { throw CameraError.noCamera }
         guard device.isExposureModeSupported(.locked) else {
             throw CameraError.configurationFailed
@@ -220,6 +279,8 @@ final class CameraService: NSObject {
     }
 
     func setWhiteBalance(kelvin: Float, tint: Float) throws {
+        // Simulator-only scaffolding: succeed silently, there is no device to lock.
+        if isPreviewMode { return }
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
@@ -254,6 +315,8 @@ final class CameraService: NSObject {
     /// Turns the torch on (full brightness) or off for extra light-box illumination.
     /// The torch belongs to the active device and resets when the lens changes.
     func setTorch(enabled: Bool) throws {
+        // Simulator-only scaffolding: succeed silently, there is no torch to drive.
+        if isPreviewMode { return }
         guard let device else { throw CameraError.noCamera }
         guard device.hasTorch else { throw CameraError.torchUnavailable }
         try device.lockForConfiguration()
@@ -266,6 +329,8 @@ final class CameraService: NSObject {
     }
 
     func setFocus(lensPosition: Float) throws {
+        // Simulator-only scaffolding: succeed silently, there is no lens to move.
+        if isPreviewMode { return }
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
@@ -277,6 +342,9 @@ final class CameraService: NSObject {
     /// settle from a timeout for capture diagnostics.
     @discardableResult
     func waitForFocusSettle(target: Float, tolerance: Float = 0.005, timeout: TimeInterval = 1.5) async -> Bool {
+        // Simulator-only scaffolding: there is no lens hunting to wait out — report an
+        // immediate clean settle so callers proceed as they would on a real device.
+        if isPreviewMode { return true }
         guard let device else { return false }
         let deadline = Date().addingTimeInterval(timeout)
         var stableTicks = 0
@@ -297,6 +365,9 @@ final class CameraService: NSObject {
     /// Captures one photo at current settings. Returns DNG data when RAW is available,
     /// otherwise HEIF/JPEG data.
     func capturePhoto() async throws -> (data: Data, isRAW: Bool) {
+        // There is no real sensor in preview mode, so there is nothing to capture —
+        // unlike the other manual controls, this can't be faked into succeeding.
+        guard !isPreviewMode else { throw CameraError.noCamera }
         let settings: AVCapturePhotoSettings
         var isRAW = false
         if let rawFormat = photoOutput.availableRawPhotoPixelFormatTypes.first {
@@ -323,6 +394,74 @@ final class CameraService: NSObject {
             }
         }
         return (data, isRAW)
+    }
+
+    /// Simulator-only scaffolding: builds one static synthetic frame for preview mode.
+    /// Drawn once in `kCVPixelFormatType_32BGRA` — the exact format the real video
+    /// output is configured for above — because `PreviewFrameProcessor` reads BGRA
+    /// bytes directly for its histogram; any other format would read as garbage.
+    /// The content exercises the overlays the way a real light-boxed subject would:
+    /// a bright near-white background pegs the histogram at the highlight end, a dark
+    /// ringed subject with hard edges gives focus peaking real edges to find, and a
+    /// small pure-white patch gives the zebra overlay a clipped highlight to paint.
+    /// Never called on a device with a camera.
+    private static func makeSyntheticPreviewBuffer() -> CVPixelBuffer? {
+        let width = 1280
+        let height = 960
+        let attrs: [CFString: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true
+        ]
+        var unmanagedBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height,
+                                         kCVPixelFormatType_32BGRA, attrs as CFDictionary,
+                                         &unmanagedBuffer)
+        guard status == kCVReturnSuccess, let buffer = unmanagedBuffer else { return nil }
+
+        CVPixelBufferLockBaseAddress(buffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        // premultipliedFirst + byteOrder32Little lays bytes out as B,G,R,A in memory,
+        // matching kCVPixelFormatType_32BGRA, so CoreGraphics can draw straight into
+        // the pixel buffer's own storage.
+        let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        guard let context = CGContext(data: base, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: bitmapInfo) else { return nil }
+
+        // Bright, near-white light-box background.
+        context.setFillColor(red: 0.96, green: 0.96, blue: 0.94, alpha: 1.0)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+
+        // Dark circular subject with concentric rings for peaking to find.
+        let center = CGPoint(x: width / 2, y: height / 2)
+        let radii: [Int] = [260, 220, 180, 140, 100, 60]
+        for (i, r) in radii.enumerated() {
+            let shade = (i % 2 == 0) ? 0.10 : 0.22
+            context.setFillColor(red: shade, green: shade, blue: shade, alpha: 1.0)
+            context.fillEllipse(in: CGRect(x: center.x - CGFloat(r), y: center.y - CGFloat(r),
+                                           width: CGFloat(r) * 2, height: CGFloat(r) * 2))
+        }
+
+        // Hard-edged spokes crossing the rings for extra high-contrast edges.
+        context.setStrokeColor(red: 0.04, green: 0.04, blue: 0.04, alpha: 1.0)
+        context.setLineWidth(6)
+        for eighth in 0..<8 {
+            let angle = Double(eighth) * .pi / 4
+            let dx = CGFloat(cos(angle)) * 280
+            let dy = CGFloat(sin(angle)) * 280
+            context.move(to: center)
+            context.addLine(to: CGPoint(x: center.x + dx, y: center.y + dy))
+            context.strokePath()
+        }
+
+        // Small pure-white blown highlight for the zebra overlay to paint.
+        context.setFillColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1.0)
+        context.fillEllipse(in: CGRect(x: width - 220, y: 60, width: 120, height: 120))
+
+        return buffer
     }
 
     private func ensurePermission() async throws {
