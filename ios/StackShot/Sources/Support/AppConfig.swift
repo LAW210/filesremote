@@ -45,6 +45,6 @@ enum AppConfig {
             var label: String { self == .jpeg ? "JPEG (eBay-friendly)" : "HEIC (smaller files)" }
         }
 
-        static let jpegQuality: CGFloat = 0.9
+        static let jpegQuality: CGFloat = 0.95
     }
 }

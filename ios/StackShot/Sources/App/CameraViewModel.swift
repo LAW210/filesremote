@@ -61,6 +61,16 @@ final class CameraViewModel: ObservableObject {
     @Published var outputFormat: AppConfig.Stacking.OutputFormat {
         didSet { persistDefaultsIfLoaded() }
     }
+    @Published var autoSaveToPhotos: Bool {
+        didSet { persistDefaultsIfLoaded() }
+    }
+    /// 1:1 crop guide overlay — eBay renders square thumbnails, so framing inside the
+    /// square before burning a multi-minute stack avoids wasted captures.
+    @Published var squareGuideEnabled: Bool {
+        didSet { persistDefaultsIfLoaded() }
+    }
+    /// True once the current result's file has been added to Photos (auto or manual).
+    @Published var resultSavedToPhotos = false
 
     /// Guards against `didSet` observers persisting the just-loaded values back to
     /// `UserDefaults` during `init`.
@@ -94,6 +104,8 @@ final class CameraViewModel: ObservableObject {
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
         _outputFormat = Published(initialValue: defaults.outputFormat)
+        _autoSaveToPhotos = Published(initialValue: defaults.autoSaveToPhotos)
+        _squareGuideEnabled = Published(initialValue: defaults.squareGuideEnabled)
         isLoaded = true
     }
 
@@ -169,7 +181,9 @@ final class CameraViewModel: ObservableObject {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
-            outputFormat: outputFormat
+            outputFormat: outputFormat,
+            autoSaveToPhotos: autoSaveToPhotos,
+            squareGuideEnabled: squareGuideEnabled
         ).save()
     }
 
@@ -247,6 +261,16 @@ final class CameraViewModel: ObservableObject {
         resultImage = output.merged
         depthMapImage = output.depthMap
         lastSet = updated
+
+        // Fully automatic flow: the exact JPEG file lands in Photos with no tap.
+        if autoSaveToPhotos, let url = stacking.mergedFileURL(for: updated) {
+            do {
+                try await stacking.saveFileToPhotos(url)
+                resultSavedToPhotos = true
+            } catch {
+                report(error)    // stacking still succeeded; only the Photos add failed
+            }
+        }
         phase = .done
     }
 
@@ -261,6 +285,7 @@ final class CameraViewModel: ObservableObject {
         Task {
             do {
                 try await stacking.saveFileToPhotos(url)
+                resultSavedToPhotos = true
             } catch {
                 report(error)
             }
@@ -271,6 +296,22 @@ final class CameraViewModel: ObservableObject {
         phase = .idle
         resultImage = nil
         depthMapImage = nil
+        resultSavedToPhotos = false
+    }
+
+    /// Stops the capture session in the background and resumes it on return —
+    /// battery/thermal hygiene, and avoids a dead viewfinder after app switching.
+    func handleScenePhase(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            camera.stop()
+        case .active:
+            // Only if the session was configured (lenses discovered) — the initial
+            // .active at launch fires before configure() completes.
+            if !lenses.isEmpty { camera.start() }
+        default:
+            break
+        }
     }
 
     // MARK: - Errors

@@ -34,13 +34,19 @@ Set your signing team, select your device, run.
 - **Depth-map view toggle** in the review/library UI to inspect the per-pixel source map.
 - **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off,
   output format) carried across app launches.
-- **Settings sheet** (gear icon): stacked output as **JPEG quality 90 (default — eBay and
+- **Settings sheet** (gear icon): stacked output as **JPEG quality 95 (default — eBay and
   other listing sites accept JPEG, not HEIC)** or HEIC for smaller files.
 - **RAW frames are deleted automatically** once the stacked image is safely written —
   only the final image is kept (so stacks can't be re-processed; re-shoot instead).
 - **Exact-bytes save & share**: Save to Photos and the share sheet both use the encoded
-  file on disk directly (no decode/re-encode), so the quality-90 JPEG is compressed
+  file on disk directly (no decode/re-encode), so the quality-95 JPEG is compressed
   exactly once, ever. Swipe-to-delete stacks in the Library.
+- **Auto-save to Photos** (on by default): the finished JPEG file lands in your photo
+  library the moment stacking completes — capture → stack → saved, no taps.
+- **1:1 crop guide** (Settings): dims what a square eBay-thumbnail crop would discard,
+  so you frame for the listing before spending a stack.
+- **Background handling**: the camera session pauses when the app is backgrounded and
+  resumes on return.
 - **Peaking on/off button** alongside the existing focus peaking overlay.
 - **One-tap gray-card white balance** lock using the device's gray-world estimate.
 - **Corrupt-stack warning** in the library when a StackSet's manifest fails to decode.

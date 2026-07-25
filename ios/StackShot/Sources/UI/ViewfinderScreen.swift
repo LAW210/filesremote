@@ -24,6 +24,10 @@ struct ViewfinderScreen: View {
                                                              in: geo.size,
                                                              imageSize: image.size))
                         }
+                    if vm.squareGuideEnabled {
+                        SquareCropGuide(viewSize: geo.size, imageSize: image.size)
+                            .allowsHitTesting(false)
+                    }
                 }
             } else {
                 ProgressView().tint(.white)
@@ -126,6 +130,39 @@ struct ViewfinderScreen: View {
         }
         .padding()
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// 1:1 crop guide: dims the parts of the (aspect-fit) camera image that a square
+/// crop would discard — eBay renders square listing thumbnails, so framing inside
+/// the bright square avoids discovering a bad crop after a multi-minute stack.
+struct SquareCropGuide: View {
+    let viewSize: CGSize
+    let imageSize: CGSize
+
+    var body: some View {
+        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+        let origin = CGPoint(x: (viewSize.width - fitted.width) / 2,
+                             y: (viewSize.height - fitted.height) / 2)
+        let side = min(fitted.width, fitted.height)
+        let square = CGRect(x: origin.x + (fitted.width - side) / 2,
+                            y: origin.y + (fitted.height - side) / 2,
+                            width: side, height: side)
+
+        ZStack {
+            // Dim everything the square crop would discard.
+            Path { path in
+                path.addRect(CGRect(origin: origin, size: fitted))
+                path.addRect(square)
+            }
+            .fill(.black.opacity(0.45), style: FillStyle(eoFill: true))
+
+            Rectangle()
+                .stroke(.white.opacity(0.8), lineWidth: 1)
+                .frame(width: square.width, height: square.height)
+                .position(x: square.midX, y: square.midY)
+        }
     }
 }
 

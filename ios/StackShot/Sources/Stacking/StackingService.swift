@@ -97,7 +97,7 @@ final class StackingService {
     }
 
     /// Adds the merged file to the photo library AS-IS — the exact encoded bytes go in,
-    /// with no decode/re-encode pass, so the quality-90 JPEG is never compressed twice.
+    /// with no decode/re-encode pass, so the quality-95 JPEG is never compressed twice.
     func saveFileToPhotos(_ url: URL) async throws {
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
         guard status == .authorized else { throw PhotosSaveError.notAuthorized }

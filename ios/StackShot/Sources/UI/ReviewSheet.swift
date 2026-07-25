@@ -4,7 +4,6 @@ import SwiftUI
 struct ReviewSheet: View {
     @EnvironmentObject var vm: CameraViewModel
     @Environment(\.dismiss) private var dismiss
-    @State private var saved = false
     @State private var showDepthMap = false
 
     var body: some View {
@@ -46,11 +45,11 @@ struct ReviewSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(saved ? "Saved ✓" : "Save to Photos") {
+                    // With auto-save on, this arrives already showing "Saved ✓".
+                    Button(vm.resultSavedToPhotos ? "Saved ✓" : "Save to Photos") {
                         vm.saveResultToPhotos()
-                        saved = true
                     }
-                    .disabled(vm.mergedFileURL == nil || saved)
+                    .disabled(vm.mergedFileURL == nil || vm.resultSavedToPhotos)
                 }
             }
         }

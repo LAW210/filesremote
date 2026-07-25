@@ -19,9 +19,18 @@ struct SettingsSheet: View {
                 } header: {
                     Text("Stacked image format")
                 } footer: {
-                    Text("JPEG (quality 90) uploads directly to listing sites — eBay " +
+                    Text("JPEG (quality 95) uploads directly to listing sites — eBay " +
                          "accepts JPEG but not HEIC. HEIC halves the file size for " +
                          "personal archiving.")
+                }
+
+                Section {
+                    Toggle("Auto-save stacked image to Photos", isOn: $vm.autoSaveToPhotos)
+                    Toggle("Show 1:1 crop guide", isOn: $vm.squareGuideEnabled)
+                } footer: {
+                    Text("Auto-save adds the finished JPEG to your photo library the " +
+                         "moment stacking completes. The crop guide dims what a square " +
+                         "(eBay-thumbnail) crop would discard so you can frame for it.")
                 }
 
                 Section {

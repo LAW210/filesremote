@@ -11,6 +11,8 @@ struct CaptureDefaults {
     var stepCount: Int
     var peakingEnabled: Bool
     var outputFormat: AppConfig.Stacking.OutputFormat
+    var autoSaveToPhotos: Bool
+    var squareGuideEnabled: Bool
 
     private enum Key {
         static let iso = "capture.iso"
@@ -20,6 +22,8 @@ struct CaptureDefaults {
         static let stepCount = "capture.stepCount"
         static let peakingEnabled = "capture.peakingEnabled"
         static let outputFormat = "capture.outputFormat"
+        static let autoSaveToPhotos = "capture.autoSaveToPhotos"
+        static let squareGuideEnabled = "capture.squareGuideEnabled"
     }
 
     /// Loads persisted values, clamping to `AppConfig` ranges and falling back to
@@ -73,6 +77,20 @@ struct CaptureDefaults {
         let outputFormat = (defaults.string(forKey: Key.outputFormat)
             .flatMap(AppConfig.Stacking.OutputFormat.init(rawValue:))) ?? .jpeg
 
+        let autoSaveToPhotos: Bool
+        if let stored = defaults.object(forKey: Key.autoSaveToPhotos) as? Bool {
+            autoSaveToPhotos = stored
+        } else {
+            autoSaveToPhotos = true
+        }
+
+        let squareGuideEnabled: Bool
+        if let stored = defaults.object(forKey: Key.squareGuideEnabled) as? Bool {
+            squareGuideEnabled = stored
+        } else {
+            squareGuideEnabled = false
+        }
+
         return CaptureDefaults(
             iso: iso,
             shutterDenominator: shutterDenominator,
@@ -80,7 +98,9 @@ struct CaptureDefaults {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
-            outputFormat: outputFormat
+            outputFormat: outputFormat,
+            autoSaveToPhotos: autoSaveToPhotos,
+            squareGuideEnabled: squareGuideEnabled
         )
     }
 
@@ -93,6 +113,8 @@ struct CaptureDefaults {
         defaults.set(stepCount, forKey: Key.stepCount)
         defaults.set(peakingEnabled, forKey: Key.peakingEnabled)
         defaults.set(outputFormat.rawValue, forKey: Key.outputFormat)
+        defaults.set(autoSaveToPhotos, forKey: Key.autoSaveToPhotos)
+        defaults.set(squareGuideEnabled, forKey: Key.squareGuideEnabled)
     }
 }
 

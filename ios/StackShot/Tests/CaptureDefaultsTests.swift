@@ -27,6 +27,8 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
         XCTAssertEqual(loaded.peakingEnabled, true)
         XCTAssertEqual(loaded.outputFormat, .jpeg)
+        XCTAssertEqual(loaded.autoSaveToPhotos, true)
+        XCTAssertEqual(loaded.squareGuideEnabled, false)
     }
 
     func testRoundtripSaveThenLoadReturnsSameValues() {
@@ -37,7 +39,9 @@ final class CaptureDefaultsTests: XCTestCase {
             tint: -12,
             stepCount: 12,
             peakingEnabled: false,
-            outputFormat: .heic
+            outputFormat: .heic,
+            autoSaveToPhotos: false,
+            squareGuideEnabled: true
         )
         original.save(to: defaults)
 
@@ -49,6 +53,8 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.stepCount, original.stepCount)
         XCTAssertEqual(loaded.peakingEnabled, original.peakingEnabled)
         XCTAssertEqual(loaded.outputFormat, original.outputFormat)
+        XCTAssertEqual(loaded.autoSaveToPhotos, original.autoSaveToPhotos)
+        XCTAssertEqual(loaded.squareGuideEnabled, original.squareGuideEnabled)
     }
 
     func testUnrecognizedOutputFormatFallsBackToJPEG() {
