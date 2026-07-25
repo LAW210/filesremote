@@ -1,13 +1,17 @@
-#import "FocusStackBridge.h"
-
 #if ENGINE_EMBEDDED
-
+// OpenCV MUST be included before any Apple header: Foundation #defines NO/YES
+// as macros, which breaks OpenCV's stitching headers (`enum { NO, ... }`).
 // Vendored by scripts/fetch_engine.sh into Vendor/focus-stack/src.
 // API verified against focusstack.hh (namespace focusstack, class FocusStack):
 // set_inputs, set_output, set_depthmap, set_align_flags(ALIGN_DEFAULT), run().
 #import <opencv2/opencv.hpp>
 #include <exception>
 #include "focusstack.hh"
+#endif
+
+#import "FocusStackBridge.h"
+
+#if ENGINE_EMBEDDED
 
 @implementation FocusStackBridge
 
