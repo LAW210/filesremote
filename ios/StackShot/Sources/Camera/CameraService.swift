@@ -96,9 +96,14 @@ final class CameraService: NSObject {
         currentLens = lens
     }
 
-    func start() {
-        sessionQueue.async {
-            if !self.session.isRunning { self.session.startRunning() }
+    /// Starts the session and returns once it is actually running, so callers can
+    /// safely re-apply device configuration (locks, torch) immediately afterwards.
+    func start() async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            sessionQueue.async {
+                if !self.session.isRunning { self.session.startRunning() }
+                cont.resume()
+            }
         }
     }
 

@@ -134,11 +134,24 @@ final class CameraViewModel: ObservableObject {
                     self.histogram = output.histogram
                 }
             }
-            preview.update { $0.peakingEnabled = peakingEnabled }
-            preview.update { $0.zebraEnabled = zebraEnabled }
-            camera.start()
+            syncPreviewSettings()
+            await camera.start()
         } catch {
             report(error)
+        }
+    }
+
+    /// Pushes main-actor-only state into the frame processor: the persisted overlay
+    /// toggles, plus screen geometry (`UIScreen` must not be read from the video queue).
+    private func syncPreviewSettings() {
+        let screen = UIScreen.main
+        let pointWidth = screen.bounds.width
+        let pixelWidth = pointWidth * screen.scale
+        preview.update {
+            $0.peakingEnabled = peakingEnabled
+            $0.zebraEnabled = zebraEnabled
+            $0.screenPointWidth = pointWidth
+            $0.screenPixelWidth = pixelWidth
         }
     }
 
@@ -322,12 +335,33 @@ final class CameraViewModel: ObservableObject {
         switch phase {
         case .background:
             camera.stop()
+            // Stopping the session extinguishes the torch in hardware; keep the UI
+            // from claiming it is still on.
+            if torchEnabled { torchEnabled = false }
         case .active:
-            // Only if the session was configured (lenses discovered) — the initial
-            // .active at launch fires before configure() completes.
-            if !lenses.isEmpty { camera.start() }
+            // Only once the session is configured (lenses discovered) — the initial
+            // .active at launch fires before configure() completes, and start()
+            // handles that case itself.
+            guard !lenses.isEmpty else { return }
+            Task { await resumeSession() }
         default:
             break
+        }
+    }
+
+    /// Re-applies the manual locks after a background trip. iOS can hand the camera
+    /// to another app while we are suspended and reset the device's exposure, white
+    /// balance, and focus, which would silently un-lock a carefully metered setup.
+    private func resumeSession() async {
+        await camera.start()
+        do {
+            if exposureLocked {
+                try camera.setExposure(iso: iso, shutterSeconds: shutterSeconds)
+                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+            }
+            try camera.setFocus(lensPosition: lensPosition)
+        } catch {
+            report(error)
         }
     }
 

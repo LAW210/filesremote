@@ -26,6 +26,11 @@ final class PreviewFrameProcessor {
         var peakingEnabled = true
         var peakingThreshold: CGFloat = 0.3
         var zebraEnabled = false
+        /// Screen geometry, supplied by the main actor — `UIScreen` is main-thread-only
+        /// and `process` runs on the camera's video queue. Defaults are a mid-range
+        /// phone, replaced with the real values as soon as the session starts.
+        var screenPointWidth: CGFloat = 390
+        var screenPixelWidth: CGFloat = 1170
     }
 
     struct Output {
@@ -64,7 +69,7 @@ final class PreviewFrameProcessor {
 
         // Downscale only the viewfinder render to the screen's pixel size; peaking
         // above already ran once on the full-resolution frame.
-        let screenScale = min(1, (UIScreen.main.bounds.width * UIScreen.main.scale) / source.extent.width)
+        let screenScale = min(1, snapshot.screenPixelWidth / source.extent.width)
         let displaySource = screenScale < 1
             ? composited.transformed(by: .init(scaleX: screenScale, y: screenScale))
             : composited
@@ -77,7 +82,8 @@ final class PreviewFrameProcessor {
             // Loupe samples from the full-resolution peaked image, not displaySource,
             // so critical focus judgments aren't degraded by the viewfinder downscale.
             loupe = renderLoupe(from: composited, center: center,
-                                magnification: snapshot.loupeMagnification)
+                                magnification: snapshot.loupeMagnification,
+                                screenPointWidth: snapshot.screenPointWidth)
         }
         return Output(viewfinder: viewfinder, loupe: loupe,
                       histogram: luminanceHistogram(of: pixelBuffer))
@@ -129,10 +135,11 @@ final class PreviewFrameProcessor {
     }
 
     private func renderLoupe(from image: CIImage, center: CGPoint,
-                             magnification: CGFloat) -> UIImage? {
+                             magnification: CGFloat,
+                             screenPointWidth: CGFloat) -> UIImage? {
         let extent = image.extent
         let sideOnScreen = AppConfig.Loupe.diameter
-        let cropSide = sideOnScreen / magnification * (extent.width / UIScreen.main.bounds.width)
+        let cropSide = sideOnScreen / magnification * (extent.width / screenPointWidth)
         let cx = extent.minX + center.x * extent.width
         let cy = extent.minY + (1 - center.y) * extent.height
         let cropRect = CGRect(x: cx - cropSide / 2, y: cy - cropSide / 2,
