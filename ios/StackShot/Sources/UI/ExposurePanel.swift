@@ -1,11 +1,11 @@
 import SwiftUI
 
-/// Manual exposure: brightness (ISO + shutter) and color (Kelvin white balance + tint),
-/// locked together for the whole stack.
+/// Brightness and colour. The camera meters continuously and the EV slider biases it;
+/// ISO and shutter are shown as a readout because the camera chooses them. Locking
+/// freezes both exposure and white balance so every frame in a bracket matches.
 struct ExposurePanel: View {
     @EnvironmentObject var vm: CameraViewModel
 
-    private let shutterStops = AppConfig.Exposure.shutterDenominators
     private let wbPresets = AppConfig.Exposure.whiteBalancePresets
 
     var body: some View {
@@ -13,23 +13,24 @@ struct ExposurePanel: View {
             HistogramView(bins: vm.histogram)
                 .frame(height: 40)
 
-            if let ev = vm.evReadout, let aperture = vm.currentAperture {
-                Text(String(format: "EV₁₀₀ %+.1f  ·  f/%.1f", ev, aperture))
+            row(String(format: "EV %+.1f", vm.evBias)) {
+                Slider(value: $vm.evBias,
+                       in: AppConfig.Exposure.evBiasRange,
+                       step: AppConfig.Exposure.evBiasStep)
+            }
+
+            // What the camera settled on — informational, not adjustable.
+            HStack {
+                Text(vm.meteringSummary ?? "metering…")
                     .font(.caption2)
+                    .monospacedDigit()
                     .foregroundStyle(.secondary)
-            }
-
-            row("ISO \(Int(vm.iso))") {
-                Slider(value: $vm.iso, in: AppConfig.Exposure.isoRange, step: 25)
-            }
-
-            row("1/\(Int(vm.shutterDenominator)) s") {
-                Picker("Shutter", selection: $vm.shutterDenominator) {
-                    ForEach(shutterStops, id: \.self) { d in
-                        Text("1/\(Int(d))").tag(d)
-                    }
+                Spacer()
+                if vm.evBias != 0 {
+                    Button("Reset EV") { vm.evBias = 0 }
+                        .font(.caption2)
+                        .buttonStyle(.bordered)
                 }
-                .pickerStyle(.segmented)
             }
 
             row("\(Int(vm.kelvin)) K") {
@@ -57,8 +58,8 @@ struct ExposurePanel: View {
                 Slider(value: $vm.tint, in: AppConfig.Exposure.tintRange, step: 1)
             }
 
-            Button(vm.exposureLocked ? "Unlock exposure" : "Apply & lock exposure") {
-                vm.exposureLocked ? vm.unlockExposure() : vm.applyAndLockExposure()
+            Button(vm.exposureLocked ? "Unlock exposure" : "Lock exposure") {
+                vm.exposureLocked ? vm.unlockExposure() : vm.lockExposure()
             }
             .buttonStyle(.borderedProminent)
             .tint(vm.exposureLocked ? .orange : .green)

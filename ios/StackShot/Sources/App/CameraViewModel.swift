@@ -29,9 +29,20 @@ final class CameraViewModel: ObservableObject {
     @Published var lenses: [CameraService.Lens] = []
     @Published var selectedLensID: String?
 
-    // Exposure (EV = ISO + shutter) and color (Kelvin WB) — independent controls.
-    @Published var iso: Float
-    @Published var shutterDenominator: Double      // e.g. 60 == 1/60 s
+    // Brightness (EV compensation on the camera's metering) and colour (Kelvin WB)
+    // are independent controls. The camera chooses ISO and shutter; EV biases it.
+    @Published var evBias: Float {
+        didSet {
+            applyExposureBias()
+            persistDefaultsIfLoaded()
+        }
+    }
+    /// What the camera is metering at right now — a readout, not a control.
+    @Published var meteredISO: Float?
+    @Published var meteredShutter: Double?
+    /// The values exposure was locked at; these shot the frames and land in EXIF.
+    private var lockedExposure: (iso: Float, shutterSeconds: Double)?
+
     @Published var kelvin: Float
     @Published var tint: Float
     @Published var exposureLocked = false
@@ -87,29 +98,22 @@ final class CameraViewModel: ObservableObject {
     /// `UserDefaults` during `init`.
     private var isLoaded = false
 
-    var shutterSeconds: Double { 1.0 / shutterDenominator }
     var canCapture: Bool {
         exposureLocked && nearAnchor != nil && farAnchor != nil && nearAnchor != farAnchor
     }
 
-    /// Current lens aperture (fixed per lens), for the live EV readout.
-    var currentAperture: Float? { camera.device?.lensAperture }
-
-    /// EV at ISO 100, computed from the live aperture and the current shutter/ISO settings.
-    var evReadout: Double? {
-        guard let aperture = camera.device?.lensAperture, aperture > 0 else { return nil }
-        let n = Double(aperture)
-        let t = shutterSeconds
-        let ev100 = log2((n * n) / t) - log2(Double(iso) / 100.0)
-        return ev100
+    /// Live metering readout, e.g. "ISO 100 · 1/125 s". Nil until the session runs.
+    var meteringSummary: String? {
+        guard let iso = meteredISO, let shutter = meteredShutter, shutter > 0 else { return nil }
+        let denominator = Int((1 / shutter).rounded())
+        return "ISO \(Int(iso)) · 1/\(denominator) s"
     }
 
     // MARK: - Lifecycle
 
     init() {
         let defaults = CaptureDefaults.load()
-        _iso = Published(initialValue: defaults.iso)
-        _shutterDenominator = Published(initialValue: defaults.shutterDenominator)
+        _evBias = Published(initialValue: defaults.evBias)
         _kelvin = Published(initialValue: defaults.kelvin)
         _tint = Published(initialValue: defaults.tint)
         _stepCount = Published(initialValue: defaults.stepCount)
@@ -132,10 +136,15 @@ final class CameraViewModel: ObservableObject {
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
                     self.histogram = output.histogram
+                    if !self.exposureLocked, let e = self.camera.currentExposure {
+                        self.meteredISO = e.iso
+                        self.meteredShutter = e.shutterSeconds
+                    }
                 }
             }
             syncPreviewSettings()
             await camera.start()
+            applyExposureBias()
         } catch {
             report(error)
         }
@@ -165,6 +174,7 @@ final class CameraViewModel: ObservableObject {
                 nearAnchor = nil
                 farAnchor = nil
                 torchEnabled = false        // torch belongs to the previous device
+                applyExposureBias()         // metering bias is per-device
                 // The new device defaults to continuous AF. Push the slider's value
                 // so the displayed focus actually matches the hardware; didSet won't
                 // fire because lensPosition itself hasn't changed.
@@ -177,18 +187,35 @@ final class CameraViewModel: ObservableObject {
 
     // MARK: - Exposure / WB
 
-    func applyAndLockExposure() {
-        do {
-            try camera.setExposure(iso: iso, shutterSeconds: shutterSeconds)
-            try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
-            exposureLocked = true
-            persistDefaults()
-        } catch {
-            report(error)
+    private func applyExposureBias() {
+        guard !exposureLocked else { return }
+        do { try camera.setExposureBias(evBias) } catch { report(error) }
+    }
+
+    /// Freezes metering and white balance so every frame in the bracket matches.
+    func lockExposure() {
+        Task {
+            await camera.waitForExposureSettle()
+            do {
+                let settled = try camera.lockExposure()
+                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+                lockedExposure = settled
+                meteredISO = settled.iso
+                meteredShutter = settled.shutterSeconds
+                exposureLocked = true
+                persistDefaults()
+            } catch {
+                report(error)
+            }
         }
     }
 
-    func unlockExposure() { exposureLocked = false }
+    /// Returns to live metering so the EV slider takes effect again.
+    func unlockExposure() {
+        exposureLocked = false
+        lockedExposure = nil
+        applyExposureBias()
+    }
 
     /// Locks white balance from a neutral gray/white card filling the frame.
     func lockGrayCardWB() {
@@ -206,8 +233,7 @@ final class CameraViewModel: ObservableObject {
 
     private func persistDefaults() {
         CaptureDefaults(
-            iso: iso,
-            shutterDenominator: shutterDenominator,
+            evBias: evBias,
             kelvin: kelvin,
             tint: tint,
             stepCount: stepCount,
@@ -271,7 +297,10 @@ final class CameraViewModel: ObservableObject {
         let controller = FocusBracketController(camera: camera)
         bracket = controller
         let plan = FocusBracketController.Plan(near: near, far: far, stepCount: stepCount)
-        let exposure = StackSet.Exposure(iso: iso, shutterSeconds: shutterSeconds)
+        let settled = lockedExposure ?? camera.currentExposure ?? (iso: 0, shutterSeconds: 0)
+        let exposure = StackSet.Exposure(iso: settled.iso,
+                                         shutterSeconds: settled.shutterSeconds,
+                                         evBias: evBias)
         let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: tint)
 
         Task {
@@ -365,8 +394,14 @@ final class CameraViewModel: ObservableObject {
         await camera.start()
         do {
             if exposureLocked {
-                try camera.setExposure(iso: iso, shutterSeconds: shutterSeconds)
+                // Re-freeze: iOS may have handed the camera to another app and reset
+                // the device while we were suspended.
+                try camera.setExposureBias(evBias)
+                await camera.waitForExposureSettle()
+                lockedExposure = try camera.lockExposure()
                 try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+            } else {
+                try camera.setExposureBias(evBias)
             }
             try camera.setFocus(lensPosition: lensPosition)
         } catch {

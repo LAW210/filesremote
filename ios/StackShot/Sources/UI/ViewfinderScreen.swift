@@ -79,7 +79,7 @@ struct ViewfinderScreen: View {
                     .tint(vm.selectedLensID == lens.id ? .yellow : .white)
             }
             Spacer()
-            Label(vm.exposureLocked ? "AE-L \(Int(vm.kelvin))K" : "Exposure unlocked",
+            Label(vm.exposureLocked ? "Exposure locked" : "Metering live",
                   systemImage: vm.exposureLocked ? "lock.fill" : "lock.open")
                 .font(.caption)
                 .foregroundStyle(vm.exposureLocked ? .green : .orange)

@@ -22,7 +22,7 @@ final class StackSetCodableTests: XCTestCase {
             createdAt: Date(),
             deviceModel: "iPhone15,2",
             lensID: "back-wide",
-            exposure: .init(iso: 100, shutterSeconds: 1.0 / 60.0),
+            exposure: .init(iso: 100, shutterSeconds: 1.0 / 60.0, evBias: -0.33),
             whiteBalance: .init(kelvin: 5000, tint: 0),
             range: .init(lensPositionNear: 0.2, lensPositionFar: 0.9, stepCount: 8),
             frames: [

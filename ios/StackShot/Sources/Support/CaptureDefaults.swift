@@ -4,8 +4,7 @@ import Foundation
 /// under a `"capture."` key prefix. Values are clamped to `AppConfig` ranges on load so
 /// stale or out-of-range stored data can never put the UI in an invalid state.
 struct CaptureDefaults {
-    var iso: Float
-    var shutterDenominator: Double
+    var evBias: Float
     var kelvin: Float
     var tint: Float
     var stepCount: Int
@@ -16,8 +15,7 @@ struct CaptureDefaults {
     var squareGuideEnabled: Bool
 
     private enum Key {
-        static let iso = "capture.iso"
-        static let shutterDenominator = "capture.shutterDenominator"
+        static let evBias = "capture.evBias"
         static let kelvin = "capture.kelvin"
         static let tint = "capture.tint"
         static let stepCount = "capture.stepCount"
@@ -32,19 +30,11 @@ struct CaptureDefaults {
     /// sensible defaults when unset (`UserDefaults`'s numeric accessors return 0 for
     /// missing keys, so `object(forKey:)` is used to distinguish "unset" from "stored").
     static func load(from defaults: UserDefaults = .standard) -> CaptureDefaults {
-        let iso: Float
-        if let stored = defaults.object(forKey: Key.iso) as? Float {
-            iso = stored.clamped(to: AppConfig.Exposure.isoRange)
+        let evBias: Float
+        if let stored = defaults.object(forKey: Key.evBias) as? Float {
+            evBias = stored.clamped(to: AppConfig.Exposure.evBiasRange)
         } else {
-            iso = 100
-        }
-
-        let shutterDenominator: Double
-        if let stored = defaults.object(forKey: Key.shutterDenominator) as? Double,
-           AppConfig.Exposure.shutterDenominators.contains(stored) {
-            shutterDenominator = stored
-        } else {
-            shutterDenominator = 60
+            evBias = 0
         }
 
         let kelvin: Float
@@ -101,8 +91,7 @@ struct CaptureDefaults {
         }
 
         return CaptureDefaults(
-            iso: iso,
-            shutterDenominator: shutterDenominator,
+            evBias: evBias,
             kelvin: kelvin,
             tint: tint,
             stepCount: stepCount,
@@ -116,8 +105,7 @@ struct CaptureDefaults {
 
     /// Writes the current values back to `UserDefaults.standard`.
     func save(to defaults: UserDefaults = .standard) {
-        defaults.set(iso, forKey: Key.iso)
-        defaults.set(shutterDenominator, forKey: Key.shutterDenominator)
+        defaults.set(evBias, forKey: Key.evBias)
         defaults.set(kelvin, forKey: Key.kelvin)
         defaults.set(tint, forKey: Key.tint)
         defaults.set(stepCount, forKey: Key.stepCount)

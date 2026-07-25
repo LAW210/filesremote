@@ -3,8 +3,13 @@ import Foundation
 /// One captured focus-bracket session: N frames plus (optionally) a stacked result.
 struct StackSet: Codable, Identifiable {
     struct Exposure: Codable {
+        /// What the camera metered and locked to — the values that actually shot
+        /// the frames, and what lands in EXIF.
         var iso: Float
         var shutterSeconds: Double
+        /// The compensation the photographer dialled in. Optional so manifests
+        /// written before EV compensation existed still decode.
+        var evBias: Float?
     }
 
     struct WhiteBalance: Codable {

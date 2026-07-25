@@ -20,8 +20,7 @@ final class CaptureDefaultsTests: XCTestCase {
 
     func testUnsetLoadReturnsDocumentedDefaults() {
         let loaded = CaptureDefaults.load(from: defaults)
-        XCTAssertEqual(loaded.iso, 100)
-        XCTAssertEqual(loaded.shutterDenominator, 60)
+        XCTAssertEqual(loaded.evBias, 0)
         XCTAssertEqual(loaded.kelvin, 5000)
         XCTAssertEqual(loaded.tint, 0)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
@@ -34,8 +33,7 @@ final class CaptureDefaultsTests: XCTestCase {
 
     func testRoundtripSaveThenLoadReturnsSameValues() {
         let original = CaptureDefaults(
-            iso: 400,
-            shutterDenominator: 250,
+            evBias: -1.0 / 3.0,
             kelvin: 3200,
             tint: -12,
             stepCount: 12,
@@ -48,8 +46,7 @@ final class CaptureDefaultsTests: XCTestCase {
         original.save(to: defaults)
 
         let loaded = CaptureDefaults.load(from: defaults)
-        XCTAssertEqual(loaded.iso, original.iso)
-        XCTAssertEqual(loaded.shutterDenominator, original.shutterDenominator)
+        XCTAssertEqual(loaded.evBias, original.evBias)
         XCTAssertEqual(loaded.kelvin, original.kelvin)
         XCTAssertEqual(loaded.tint, original.tint)
         XCTAssertEqual(loaded.stepCount, original.stepCount)
@@ -68,22 +65,23 @@ final class CaptureDefaultsTests: XCTestCase {
     }
 
     func testOutOfRangePersistedValuesAreClampedOnLoad() {
-        defaults.set(Float(999999), forKey: "capture.iso")
         defaults.set(Float(-1), forKey: "capture.kelvin")
         defaults.set(Float(9999), forKey: "capture.tint")
         defaults.set(999, forKey: "capture.stepCount")
 
         let loaded = CaptureDefaults.load(from: defaults)
-        XCTAssertEqual(loaded.iso, AppConfig.Exposure.isoRange.upperBound)
         XCTAssertEqual(loaded.kelvin, AppConfig.Exposure.kelvinRange.lowerBound)
         XCTAssertEqual(loaded.tint, AppConfig.Exposure.tintRange.upperBound)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.stepRange.upperBound)
     }
 
-    func testUnrecognizedShutterDenominatorFallsBackToSixty() {
-        defaults.set(Double(37), forKey: "capture.shutterDenominator")
+    func testOutOfRangeEVBiasIsClampedOnLoad() {
+        defaults.set(Float(12), forKey: "capture.evBias")
+        XCTAssertEqual(CaptureDefaults.load(from: defaults).evBias,
+                       AppConfig.Exposure.evBiasRange.upperBound)
 
-        let loaded = CaptureDefaults.load(from: defaults)
-        XCTAssertEqual(loaded.shutterDenominator, 60)
+        defaults.set(Float(-12), forKey: "capture.evBias")
+        XCTAssertEqual(CaptureDefaults.load(from: defaults).evBias,
+                       AppConfig.Exposure.evBiasRange.lowerBound)
     }
 }

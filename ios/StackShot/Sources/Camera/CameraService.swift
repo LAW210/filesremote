@@ -156,18 +156,56 @@ final class CameraService: NSObject {
 
     var device: AVCaptureDevice? { currentLens?.device }
 
-    func setExposure(iso: Float, shutterSeconds: Double) throws {
+    /// What the camera is currently metering at — shown live, and recorded once locked.
+    var currentExposure: (iso: Float, shutterSeconds: Double)? {
+        guard let device else { return nil }
+        return (device.iso, CMTimeGetSeconds(device.exposureDuration))
+    }
+
+    /// Applies exposure compensation to the camera's own metering and leaves it
+    /// metering continuously, so the preview shows the result immediately. Nothing is
+    /// frozen until `lockExposure()`.
+    func setExposureBias(_ ev: Float) throws {
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        let fmt = device.activeFormat
-        let clampedISO = iso.clamped(to: fmt.minISO...fmt.maxISO)
-        let duration = CMTime(seconds: shutterSeconds, preferredTimescale: 1_000_000)
-        let clampedDuration = CMTimeClampToRange(
-            duration,
-            range: CMTimeRange(start: device.activeFormat.minExposureDuration,
-                               end: device.activeFormat.maxExposureDuration))
-        device.setExposureModeCustom(duration: clampedDuration, iso: clampedISO)
+        if device.isExposureModeSupported(.continuousAutoExposure) {
+            device.exposureMode = .continuousAutoExposure
+        }
+        device.setExposureTargetBias(
+            ev.clamped(to: device.minExposureTargetBias...device.maxExposureTargetBias))
+    }
+
+    /// Waits for metering to stop hunting, so a lock captures a settled value rather
+    /// than whatever the algorithm happened to be passing through.
+    func waitForExposureSettle(timeout: TimeInterval = 1.5) async {
+        guard let device else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        var stableTicks = 0
+        while Date() < deadline {
+            if !device.isAdjustingExposure {
+                stableTicks += 1
+                if stableTicks >= 3 { return }      // ~90 ms of stability
+            } else {
+                stableTicks = 0
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+    }
+
+    /// Freezes exposure at the metered value. Every frame in a bracket must share one
+    /// exposure or the stack bands, so this is a precondition for capture. Returns the
+    /// values the camera settled on, for the manifest and EXIF.
+    @discardableResult
+    func lockExposure() throws -> (iso: Float, shutterSeconds: Double) {
+        guard let device else { throw CameraError.noCamera }
+        guard device.isExposureModeSupported(.locked) else {
+            throw CameraError.configurationFailed
+        }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        device.exposureMode = .locked
+        return (device.iso, CMTimeGetSeconds(device.exposureDuration))
     }
 
     func setWhiteBalance(kelvin: Float, tint: Float) throws {

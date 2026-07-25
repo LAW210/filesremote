@@ -23,8 +23,9 @@ Set your signing team, select your device, run.
 
 ## What works out of the box (once it compiles)
 
-- Lens picker (0.5x / 1x / Tele), manual ISO + shutter with a **live luminance histogram**,
-  **Kelvin white balance** with light-box presets + tint, one-button lock for the whole stack.
+- Lens picker (0.5x / 1x / Tele); **EV compensation** on the camera's own metering with a
+  **live luminance histogram** and an ISO/shutter readout; **Kelvin white balance** with
+  light-box presets + tint; one Lock that freezes both for the whole stack.
 - Manual focus slider with **focus peaking** (green edge overlay) and the **3× loupe**
   (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness.
 - **Set Near / Set Far** anchors → adjustable-count bracket (default 8, inclusive endpoints)
@@ -36,7 +37,7 @@ Set your signing team, select your device, run.
 - A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
   no alignment) so the end-to-end flow works before the C++ engine is wired in.
 - **Depth-map view toggle** in the review/library UI to inspect the per-pixel source map.
-- **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off,
+- **Persisted capture settings** (EV bias, Kelvin, tint, step count, overlay toggles,
   output format) carried across app launches.
 - **Settings sheet** (gear icon): stacked output as **JPEG quality 95 (default — eBay and
   other listing sites accept JPEG, not HEIC)** or **PNG (lossless master, ~4–6× larger,

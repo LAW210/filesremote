@@ -18,10 +18,13 @@ enum AppConfig {
     }
 
     enum Exposure {
-        static let isoRange: ClosedRange<Float> = 25...1600
+        /// Exposure compensation applied to the camera's own metering. The device
+        /// reports its own supported bias range; this is the slider's range, clamped
+        /// to the device's at apply time.
+        static let evBiasRange: ClosedRange<Float> = -3...3
+        static let evBiasStep: Float = 1.0 / 3.0      // third-stop detents
         static let kelvinRange: ClosedRange<Float> = 2500...8000
         static let tintRange: ClosedRange<Float> = -50...50
-        static let shutterDenominators: [Double] = [4, 8, 15, 30, 60, 125, 250, 500, 1000]
         static let whiteBalancePresets: [(name: String, kelvin: Float)] = [
             ("Tungsten", 3200), ("LED", 5000), ("Daylight", 5600),
         ]

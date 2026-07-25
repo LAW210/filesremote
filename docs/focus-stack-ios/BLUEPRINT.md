@@ -303,7 +303,7 @@ As shipped (`Sources/Models/StackSet.swift`):
 ```
 StackSet
 ├── id, createdAt, deviceModel, lensID
-├── exposure: { iso, shutterSeconds }
+├── exposure: { iso, shutterSeconds, evBias? }   # metered result + dialled bias
 ├── whiteBalance: { kelvin, tint }
 ├── range: { lensPositionNear, lensPositionFar, stepCount }
 ├── frames: [ Frame { index, lensPosition, fileName (dng|heic), capturedAt } ]
@@ -422,8 +422,14 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
 
 ### 14.2 Shooting aids not in the original plan
 
-- **Live EV₁₀₀ + aperture readout** — the plan had a vague "EV meter"; this is the real
-  computation from ISO, shutter, and the active lens's aperture.
+- **EV compensation replaced manual ISO and shutter.** The blueprint (§6.2) specified
+  fully manual exposure via `setExposureModeCustom`. In practice a light box is a fixed
+  lighting environment where the only judgement needed is "brighter or darker", so the
+  two controls were replaced by a single EV slider biasing the camera's own metering,
+  with ISO and shutter shown as a readout. The stack-critical invariant is preserved by
+  **Lock**, which freezes metering (`exposureMode = .locked`) after it settles — every
+  frame in a bracket still shares one exposure, and the metered values are what land in
+  the manifest and EXIF. Net effect: three controls became one.
 - **Zebra overlay** — paints blown highlights red in the live preview. Chrome in a light
   box clips readily and clipped pixels cannot be recovered in an edit. Chosen over a
   numeric clipped-percentage readout, which conveyed the same fact less usefully.
