@@ -20,6 +20,13 @@ final class NativeDepthMapStacker: StackEngine {
     /// maximum, which risks termination. Peak is now roughly 40 MB regardless of N.
     func stack(frameURLs: [URL], progress: @escaping (Double) -> Void) async throws -> StackOutput {
         guard !frameURLs.isEmpty else { throw StackEngineError.noFrames }
+        // The per-pixel source index is a UInt8, so frame 256 would trap on conversion.
+        // The UI caps a bracket at 20, but this is a protocol entry point — turn an
+        // unreachable-today crash into an error a caller can actually report.
+        guard frameURLs.count <= 256 else {
+            throw StackEngineError.engineFailed(
+                "this engine supports at most 256 frames, got \(frameURLs.count)")
+        }
 
         var width = 0, height = 0
         var bestValue: [Float] = []

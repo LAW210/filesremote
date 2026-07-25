@@ -311,6 +311,11 @@ final class CameraService: NSObject {
     /// Locks white balance using the device's gray-world estimate. Point the camera at a
     /// neutral gray/white card filling the frame first.
     func lockNeutralWhiteBalance() throws -> (kelvin: Float, tint: Float) {
+        // Simulator-only scaffolding: report a plausible neutral reading, matching how
+        // every other manual control behaves here. Without this the Gray card button is
+        // the one control that raises an error alert in preview mode, which reads as a
+        // fault in the very build meant for exercising the UI.
+        if isPreviewMode { return (5000, 0) }
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }

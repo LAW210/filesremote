@@ -453,7 +453,9 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
 - **Closest-focusing lens selected by default** — on modern iPhones the ultra-wide *is*
   the macro lens, so picking the lens with the smallest `minimumFocusDistance` lands on
   the right one for a reel without the owner having to know that. Lens selection collapsed
-  from a chip per camera to one button that cycles them, showing the device's own name.
+  from a chip per camera to one button that cycles them. The labels themselves are still
+  the original `0.5x` / `1x` / `Tele` — which mixes magnifications with a lens type, and
+  is the one item from the pre-build review list that remains unaddressed.
 - **Loupe reticle and dodge** — a yellow reticle marks the point being magnified, and the
   loupe sits on the side opposite it. The dodge is horizontal only: the bottom of the
   screen belongs to the control panel, so dodging downward would trade one occlusion for
@@ -534,7 +536,13 @@ session diagnosable rather than a guessing game.
    Measure on device before splitting — it may not be perceptible.
 5. **Undecodable manifests are silently skipped**, so a directory that fails to decode
    is never reclaimed. Mitigated by only ever adding optional schema fields.
-6. **Diopter-even focus spacing** remains deferred; v1 spaces evenly in lens position,
+6. **The fallback stacker's box blur is the naive separable form** — 9 adds per pixel per
+   pass rather than a sliding window — so sharpness mapping is O(radius) per pixel across
+   ~3 M pixels per frame. Correct, but likely slow enough to notice on a long bracket.
+   Deliberately not rewritten while the app has no device time: it is the highest-risk
+   code to change blind, since a subtly wrong edge case in the smoothing would show up as
+   a bad stack rather than a crash, and nothing here is testable without hardware.
+7. **Diopter-even focus spacing** remains deferred; v1 spaces evenly in lens position,
    which is only approximately even in real distance (§7). The `spacingMode` manifest
    field that anticipated it was removed as speculative — it was written but never
    read, and `JSONDecoder` ignores unknown keys, so reintroducing it later is free.
