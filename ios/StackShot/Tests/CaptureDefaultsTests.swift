@@ -26,6 +26,7 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.tint, 0)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
         XCTAssertEqual(loaded.peakingEnabled, true)
+        XCTAssertEqual(loaded.zebraEnabled, false)
         XCTAssertEqual(loaded.outputFormat, .jpeg)
         XCTAssertEqual(loaded.autoSaveToPhotos, true)
         XCTAssertEqual(loaded.squareGuideEnabled, false)
@@ -39,6 +40,7 @@ final class CaptureDefaultsTests: XCTestCase {
             tint: -12,
             stepCount: 12,
             peakingEnabled: false,
+            zebraEnabled: true,
             outputFormat: .heic,
             autoSaveToPhotos: false,
             squareGuideEnabled: true
@@ -52,6 +54,7 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.tint, original.tint)
         XCTAssertEqual(loaded.stepCount, original.stepCount)
         XCTAssertEqual(loaded.peakingEnabled, original.peakingEnabled)
+        XCTAssertEqual(loaded.zebraEnabled, original.zebraEnabled)
         XCTAssertEqual(loaded.outputFormat, original.outputFormat)
         XCTAssertEqual(loaded.autoSaveToPhotos, original.autoSaveToPhotos)
         XCTAssertEqual(loaded.squareGuideEnabled, original.squareGuideEnabled)

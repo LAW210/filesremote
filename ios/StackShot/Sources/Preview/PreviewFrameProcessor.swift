@@ -25,6 +25,7 @@ final class PreviewFrameProcessor {
         var loupeMagnification: CGFloat = AppConfig.Loupe.defaultMagnification
         var peakingEnabled = true
         var peakingThreshold: CGFloat = 0.3
+        var zebraEnabled = false
     }
 
     struct Output {
@@ -56,9 +57,12 @@ final class PreviewFrameProcessor {
         let snapshot = lock.withLock { settings }
 
         let source = CIImage(cvPixelBuffer: pixelBuffer)
-        let composited = snapshot.peakingEnabled
+        var composited = snapshot.peakingEnabled
             ? applyPeaking(to: source, threshold: snapshot.peakingThreshold)
             : source
+        if snapshot.zebraEnabled {
+            composited = applyZebra(to: composited, source: source)
+        }
 
         // Downscale only the viewfinder render to the screen's pixel size; peaking
         // above already ran once on the full-resolution frame.
@@ -106,6 +110,25 @@ final class PreviewFrameProcessor {
                                                     parameters: [kCIInputBackgroundImageKey: tint])
         return greenEdges.applyingFilter("CIScreenBlendMode",
                                          parameters: [kCIInputBackgroundImageKey: source])
+    }
+
+    /// Paints solid red over pixels that are clipped (blown highlights) in the SOURCE
+    /// image's luminance, so the overlay reflects what the sensor actually captured,
+    /// not the peaked/edge-enhanced composite. Screen-blending red onto near-white
+    /// pixels wouldn't show (screen(white, red) ≈ white), so this uses CIBlendWithMask
+    /// to replace clipped pixels outright.
+    private func applyZebra(to image: CIImage, source: CIImage) -> CIImage {
+        let mono = source.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0])
+        let mask = mono.applyingFilter("CIColorThreshold", parameters: ["inputThreshold": 0.97])
+            .cropped(to: source.extent)
+
+        let red = CIImage(color: CIColor(red: 1.0, green: 0.0, blue: 0.0))
+            .cropped(to: source.extent)
+
+        return red.applyingFilter("CIBlendWithMask",
+                                  parameters: [kCIInputBackgroundImageKey: image,
+                                               kCIInputMaskImageKey: mask])
+            .cropped(to: source.extent)
     }
 
     private func renderLoupe(from image: CIImage, center: CGPoint,

@@ -37,6 +37,12 @@ struct ViewfinderScreen: View {
                 LoupeView(image: loupe)
             }
 
+            LevelIndicatorView()
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.top, 60)
+                .padding(.leading, 16)
+
             VStack {
                 topBar
                 Spacer()

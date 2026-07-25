@@ -53,4 +53,51 @@ jobs:
             -destination "platform=iOS Simulator,id=$DEVICE_ID" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            -resultBundlePath TestResults.xcresult \
             test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ios/StackShot/TestResults.xcresult
+          retention-days: 14
+
+  build-engine:
+    # Compile-checks the embedded C++ engine path (ENGINE_EMBEDDED) using the
+    # standalone project-engine.yml spec. Build-only — no tests — since this
+    # job's purpose is to catch breakage in the engine bridge/vendor sources.
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install xcodegen
+
+      - name: Cache vendored engine + OpenCV
+        uses: actions/cache@v4
+        with:
+          path: ios/StackShot/Vendor
+          key: engine-vendor-opencv-4.9.0-v1
+
+      - name: Fetch engine sources
+        working-directory: ios/StackShot
+        run: scripts/fetch_engine.sh
+
+      - name: Generate Xcode project
+        working-directory: ios/StackShot
+        run: xcodegen generate --spec project-engine.yml
+
+      - name: Build with engine embedded
+        working-directory: ios/StackShot
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project StackShotEngine.xcodeproj \
+            -scheme StackShot \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

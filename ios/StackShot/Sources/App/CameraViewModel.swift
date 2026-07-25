@@ -56,6 +56,13 @@ final class CameraViewModel: ObservableObject {
             persistDefaultsIfLoaded()
         }
     }
+    /// Zebra overlay — tints clipped (blown highlight) pixels red in the live viewfinder.
+    @Published var zebraEnabled: Bool {
+        didSet {
+            preview.update { $0.zebraEnabled = zebraEnabled }
+            persistDefaultsIfLoaded()
+        }
+    }
 
     // Output settings (Settings sheet): stacked-image format. Source RAW frames are
     // always deleted once the stacked image is safely on disk — by design, only the
@@ -108,6 +115,7 @@ final class CameraViewModel: ObservableObject {
         _tint = Published(initialValue: defaults.tint)
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
+        _zebraEnabled = Published(initialValue: defaults.zebraEnabled)
         _outputFormat = Published(initialValue: defaults.outputFormat)
         _autoSaveToPhotos = Published(initialValue: defaults.autoSaveToPhotos)
         _squareGuideEnabled = Published(initialValue: defaults.squareGuideEnabled)
@@ -129,6 +137,7 @@ final class CameraViewModel: ObservableObject {
                 }
             }
             preview.update { $0.peakingEnabled = peakingEnabled }
+            preview.update { $0.zebraEnabled = zebraEnabled }
             camera.start()
         } catch {
             report(error)
@@ -188,6 +197,7 @@ final class CameraViewModel: ObservableObject {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
+            zebraEnabled: zebraEnabled,
             outputFormat: outputFormat,
             autoSaveToPhotos: autoSaveToPhotos,
             squareGuideEnabled: squareGuideEnabled

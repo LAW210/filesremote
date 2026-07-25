@@ -49,6 +49,13 @@ struct FocusPanel: View {
                 .toggleStyle(.button)
                 .tint(.green)
 
+                Toggle(isOn: $vm.zebraEnabled) {
+                    Label("Zebra", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                }
+                .toggleStyle(.button)
+                .tint(.red)
+
                 Toggle(isOn: .init(get: { vm.torchEnabled },
                                    set: { vm.setTorch($0) })) {
                     Label("Torch", systemImage: vm.torchEnabled ? "bolt.fill" : "bolt.slash")

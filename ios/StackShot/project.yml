@@ -31,6 +31,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: "StackShot uses the camera to capture focus-bracketed photos."
         NSPhotoLibraryAddUsageDescription: "StackShot saves your stacked photos to your library."
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
 
   StackShotTests:
     type: bundle.unit-test

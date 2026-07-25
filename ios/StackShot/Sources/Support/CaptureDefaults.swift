@@ -10,6 +10,7 @@ struct CaptureDefaults {
     var tint: Float
     var stepCount: Int
     var peakingEnabled: Bool
+    var zebraEnabled: Bool
     var outputFormat: AppConfig.Stacking.OutputFormat
     var autoSaveToPhotos: Bool
     var squareGuideEnabled: Bool
@@ -21,6 +22,7 @@ struct CaptureDefaults {
         static let tint = "capture.tint"
         static let stepCount = "capture.stepCount"
         static let peakingEnabled = "capture.peakingEnabled"
+        static let zebraEnabled = "capture.zebraEnabled"
         static let outputFormat = "capture.outputFormat"
         static let autoSaveToPhotos = "capture.autoSaveToPhotos"
         static let squareGuideEnabled = "capture.squareGuideEnabled"
@@ -73,6 +75,13 @@ struct CaptureDefaults {
             peakingEnabled = true
         }
 
+        let zebraEnabled: Bool
+        if let stored = defaults.object(forKey: Key.zebraEnabled) as? Bool {
+            zebraEnabled = stored
+        } else {
+            zebraEnabled = false
+        }
+
         // Unrecognized stored strings fall back to JPEG (the listing-site-safe default).
         let outputFormat = (defaults.string(forKey: Key.outputFormat)
             .flatMap(AppConfig.Stacking.OutputFormat.init(rawValue:))) ?? .jpeg
@@ -98,6 +107,7 @@ struct CaptureDefaults {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
+            zebraEnabled: zebraEnabled,
             outputFormat: outputFormat,
             autoSaveToPhotos: autoSaveToPhotos,
             squareGuideEnabled: squareGuideEnabled
@@ -112,6 +122,7 @@ struct CaptureDefaults {
         defaults.set(tint, forKey: Key.tint)
         defaults.set(stepCount, forKey: Key.stepCount)
         defaults.set(peakingEnabled, forKey: Key.peakingEnabled)
+        defaults.set(zebraEnabled, forKey: Key.zebraEnabled)
         defaults.set(outputFormat.rawValue, forKey: Key.outputFormat)
         defaults.set(autoSaveToPhotos, forKey: Key.autoSaveToPhotos)
         defaults.set(squareGuideEnabled, forKey: Key.squareGuideEnabled)
