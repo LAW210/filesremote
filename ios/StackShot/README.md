@@ -32,8 +32,11 @@ Set your signing team, select your device, run.
 - A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
   no alignment) so the end-to-end flow works before the C++ engine is wired in.
 - **Depth-map view toggle** in the review/library UI to inspect the per-pixel source map.
-- **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off)
-  carried across app launches.
+- **Persisted capture settings** (ISO, shutter, Kelvin, tint, step count, peaking on/off,
+  output format, keep-frames) carried across app launches.
+- **Settings sheet** (gear icon): stacked output as **JPEG quality 90 (default — eBay and
+  other listing sites accept JPEG, not HEIC)** or HEIC for smaller files, and a toggle to
+  **keep or auto-delete the RAW source frames** after a successful stack.
 - **Peaking on/off button** alongside the existing focus peaking overlay.
 - **One-tap gray-card white balance** lock using the device's gray-world estimate.
 - **Corrupt-stack warning** in the library when a StackSet's manifest fails to decode.

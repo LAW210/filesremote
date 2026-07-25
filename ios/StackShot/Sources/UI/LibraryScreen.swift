@@ -91,19 +91,26 @@ struct StackSetDetail: View {
                         .toggleStyle(.button)
                 }
 
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(set.frames) { frame in
-                            FrameThumbnail(url: StackStore.shared.frameURL(set, frame))
+                if set.framesPurged == true {
+                    Label("RAW frames were deleted after stacking — re-stacking is unavailable",
+                          systemImage: "trash.slash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(set.frames) { frame in
+                                FrameThumbnail(url: StackStore.shared.frameURL(set, frame))
+                            }
                         }
                     }
-                }
 
-                Button(stacking ? "Stacking…" : "Re-stack") {
-                    restack()
+                    Button(stacking ? "Stacking…" : "Re-stack") {
+                        restack()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(stacking)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(stacking)
 
                 if let merged {
                     Button("Save to Photos") {
@@ -133,9 +140,12 @@ struct StackSetDetail: View {
     private func restack() {
         stacking = true
         errorText = nil
+        // Frames are never deleted on a library re-stack — the user already chose to
+        // keep this set's frames; only the format setting is honored.
+        let format = CaptureDefaults.load().outputFormat
         Task {
             do {
-                let (updated, output) = try await service.stackAndPersist(set)
+                let (updated, output) = try await service.stackAndPersist(set, outputFormat: format)
                 set = updated
                 merged = output.merged
                 depthMap = output.depthMap

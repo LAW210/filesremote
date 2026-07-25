@@ -31,7 +31,20 @@ enum AppConfig {
         /// The Swift fallback engine downscales to this to bound memory and CPU;
         /// the embedded C++ engine works at full resolution.
         static let fallbackMaxDimension: CGFloat = 2048
-        static let mergedFileName = "stacked.heic"
         static let depthMapFileName = "depthmap.heic"
+
+        /// Format of the final stacked image. JPEG is the default because listing
+        /// sites (eBay accepts JPEG/PNG/TIFF/BMP/GIF/WebP — not HEIC) want it and
+        /// recommend high-quality JPEG uploads; HEIC is offered to save space.
+        enum OutputFormat: String, CaseIterable, Identifiable {
+            case jpeg
+            case heic
+
+            var id: String { rawValue }
+            var mergedFileName: String { self == .jpeg ? "stacked.jpg" : "stacked.heic" }
+            var label: String { self == .jpeg ? "JPEG (eBay-friendly)" : "HEIC (smaller files)" }
+        }
+
+        static let jpegQuality: CGFloat = 0.9
     }
 }

@@ -55,6 +55,15 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    // Output settings (Settings sheet): stacked-image format and whether the
+    // source RAW frames survive a successful stack.
+    @Published var outputFormat: AppConfig.Stacking.OutputFormat {
+        didSet { persistDefaultsIfLoaded() }
+    }
+    @Published var keepFrames: Bool {
+        didSet { persistDefaultsIfLoaded() }
+    }
+
     /// Guards against `didSet` observers persisting the just-loaded values back to
     /// `UserDefaults` during `init`.
     private var isLoaded = false
@@ -86,6 +95,8 @@ final class CameraViewModel: ObservableObject {
         _tint = Published(initialValue: defaults.tint)
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
+        _outputFormat = Published(initialValue: defaults.outputFormat)
+        _keepFrames = Published(initialValue: defaults.keepFrames)
         isLoaded = true
     }
 
@@ -160,7 +171,9 @@ final class CameraViewModel: ObservableObject {
             kelvin: kelvin,
             tint: tint,
             stepCount: stepCount,
-            peakingEnabled: peakingEnabled
+            peakingEnabled: peakingEnabled,
+            outputFormat: outputFormat,
+            keepFrames: keepFrames
         ).save()
     }
 
@@ -229,7 +242,10 @@ final class CameraViewModel: ObservableObject {
 
     func stack(set: StackSet) async throws {
         phase = .stacking(0)
-        let (updated, output) = try await stacking.stackAndPersist(set) { p in
+        let (updated, output) = try await stacking.stackAndPersist(
+            set,
+            outputFormat: outputFormat,
+            deleteFramesAfter: !keepFrames) { p in
             Task { @MainActor in self.phase = .stacking(p) }
         }
         resultImage = output.merged

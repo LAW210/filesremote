@@ -26,6 +26,8 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.tint, 0)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
         XCTAssertEqual(loaded.peakingEnabled, true)
+        XCTAssertEqual(loaded.outputFormat, .jpeg)
+        XCTAssertEqual(loaded.keepFrames, true)
     }
 
     func testRoundtripSaveThenLoadReturnsSameValues() {
@@ -35,7 +37,9 @@ final class CaptureDefaultsTests: XCTestCase {
             kelvin: 3200,
             tint: -12,
             stepCount: 12,
-            peakingEnabled: false
+            peakingEnabled: false,
+            outputFormat: .heic,
+            keepFrames: false
         )
         original.save(to: defaults)
 
@@ -46,6 +50,15 @@ final class CaptureDefaultsTests: XCTestCase {
         XCTAssertEqual(loaded.tint, original.tint)
         XCTAssertEqual(loaded.stepCount, original.stepCount)
         XCTAssertEqual(loaded.peakingEnabled, original.peakingEnabled)
+        XCTAssertEqual(loaded.outputFormat, original.outputFormat)
+        XCTAssertEqual(loaded.keepFrames, original.keepFrames)
+    }
+
+    func testUnrecognizedOutputFormatFallsBackToJPEG() {
+        defaults.set("webp", forKey: "capture.outputFormat")
+
+        let loaded = CaptureDefaults.load(from: defaults)
+        XCTAssertEqual(loaded.outputFormat, .jpeg)
     }
 
     func testOutOfRangePersistedValuesAreClampedOnLoad() {

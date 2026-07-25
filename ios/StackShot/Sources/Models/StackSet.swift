@@ -46,6 +46,9 @@ struct StackSet: Codable, Identifiable {
     var range: Range
     var frames: [Frame]
     var result: Result?
+    /// True when the source frames were deleted after a successful stack (user setting).
+    /// Optional so manifests written before this field still decode.
+    var framesPurged: Bool?
 }
 
 /// Persists StackSets as folders of frames + manifest.json in the app sandbox.

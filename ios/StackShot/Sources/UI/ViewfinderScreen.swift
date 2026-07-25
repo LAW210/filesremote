@@ -4,6 +4,7 @@ struct ViewfinderScreen: View {
     @EnvironmentObject var vm: CameraViewModel
     @State private var showExposurePanel = false
     @State private var showFocusPanel = true
+    @State private var showSettings = false
 
     var body: some View {
         ZStack {
@@ -88,6 +89,13 @@ struct ViewfinderScreen: View {
                 Image(systemName: "photo.stack")
             }
             .tint(.white)
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .tint(.white)
+            .sheet(isPresented: $showSettings) { SettingsSheet() }
         }
     }
 

@@ -31,7 +31,8 @@ final class StackSetCodableTests: XCTestCase {
                 .init(index: 1, lensPosition: 0.4, fileName: "frame_01.heic", capturedAt: Date()),
             ],
             result: .init(mergedFileName: "stacked.heic", engine: "swift-fallback",
-                         processedAt: Date(), depthMapFileName: depthMapFileName)
+                         processedAt: Date(), depthMapFileName: depthMapFileName),
+            framesPurged: nil
         )
     }
 
@@ -80,5 +81,6 @@ final class StackSetCodableTests: XCTestCase {
 
         XCTAssertEqual(decoded.result?.mergedFileName, "stacked.heic")
         XCTAssertNil(decoded.result?.depthMapFileName)
+        XCTAssertNil(decoded.framesPurged)
     }
 }
