@@ -1,9 +1,13 @@
 # StackShot — iOS Manual Focus-Stacking Camera
 
-**Engineering blueprint (design only — no implementation yet)**
+**Engineering blueprint — implemented. See §14 for what shipped beyond this design.**
 
-Version 0.1 · Target platform: iOS 17+ · Primary use case: macro focus stacking of
+Version 0.2 · Target platform: iOS 17+ · Primary use case: macro focus stacking of
 stationary subjects (e.g. a fly reel inside a light box).
+
+Status: the app in `ios/StackShot/` implements this design. It builds and its unit
+tests pass in CI, and a second CI job compile-checks the embedded C++ engine path.
+It has **not yet run on a phone** — no on-device behaviour is validated.
 
 ---
 
@@ -20,8 +24,10 @@ A manual-control camera app that lets a photographer:
 
 The output is a single all-in-focus image (plus an optional depth map), saved to the photo library.
 
-> This document is the blueprint only. Code sketches below are illustrative of the intended
-> API usage, not the final implementation.
+> Sections 1–13 are the original design and its rationale, preserved because the
+> reasoning (Method-B mapping, spacing math, licensing) still governs the app. Code
+> sketches are illustrative; consult the source for exact APIs. Section 14 records
+> where the shipped app diverges from or extends this plan.
 
 ---
 
@@ -199,7 +205,7 @@ device.setWhiteBalanceModeLocked(with: gains) { _ in }
 Once set, **both EV and Kelvin white balance are locked for the entire stack** — no exposure or
 color drift between frames, which is what keeps the fused result clean.
 
-### 6.3 Manual focus + "where is it focused" — `FocusController`
+### 6.3 Manual focus + "where is it focused" — `CameraService` + `PreviewFrameProcessor`
 - Focus slider maps to `setFocusModeLocked(lensPosition:)`, `lensPosition ∈ [0,1]`.
 - **Focus peaking overlay:** iOS has no built-in peaking, so we compute it ourselves — run a
   Sobel/edge filter (Metal shader or Core Image `CIEdges`) on each preview frame and paint
@@ -292,18 +298,23 @@ with the remaining 6 evenly spaced between them.
 
 ## 8. Data model
 
+As shipped (`Sources/Models/StackSet.swift`):
+
 ```
 StackSet
 ├── id, createdAt, deviceModel, lensID
-├── exposure: { iso, shutterSeconds, evReadout }
-├── whiteBalance: { kelvin, tint, gains }
+├── exposure: { iso, shutterSeconds }
+├── whiteBalance: { kelvin, tint }
 ├── range: { lensPositionNear, lensPositionFar, stepCount, spacingMode }
-├── frames: [ Frame { index, lensPosition, fileURL(dng/heif), capturedAt } ]
-└── result: { mergedImageURL, depthMapURL, engineOptions, processedAt } | nil
+├── frames: [ Frame { index, lensPosition, fileName (dng|heic), capturedAt } ]
+└── result: { mergedFileName, engine, processedAt, depthMapFileName? } | nil
 ```
 
-Persisted to the app sandbox; `manifest.json` per set. Results are optional so a set can be
-re-stacked with different engine options.
+One directory per set in the app sandbox, holding `manifest.json` plus the merged image
+(and the depth map, while that diagnostic is retained). `result` is nil until stacking
+succeeds; once it is set, the frame *files* are gone even though `frames` still records
+their metadata — the manifest stays the capture record. New fields are added as
+optionals so older manifests keep decoding.
 
 ---
 
@@ -316,9 +327,10 @@ re-stacked with different engine options.
 3. **Focus panel** — focus slider + reticle readout, **3× focus loupe** for confirming sharpness,
    **Set Near** / **Set Far** buttons, a planned-steps strip showing the 8 focus planes.
 4. **Capture progress** — "Frame 3 / 8", cancel.
-5. **Review** — merged result with a **before/after** and per-frame filmstrip, **Re-stack**
-   (change method/steps), depth-map view, **Export to Photos / Share**.
-6. **Library** — saved StackSets, re-open to re-process.
+5. **Review** — merged result, depth-map view, capture settings, share. No filmstrip or
+   re-stack: source frames are deleted once a stack succeeds (§14).
+6. **Library** — saved stacks: browse, export, swipe-delete.
+6b. **Settings** — output format (JPEG/PNG), auto-save to Photos, 1:1 crop guide.
 7. **Acknowledgements** — third-party licenses (OpenCV Apache-2.0, focus-stack MIT).
 
 ---
@@ -340,18 +352,18 @@ re-stacked with different engine options.
 
 ---
 
-## 11. Phased roadmap
+## 11. Phased roadmap — status
 
-- **M0 — Skeleton:** Xcode project, camera permission, live viewfinder, lens picker.
-- **M1 — Manual controls:** ISO/shutter/WB lock + histogram; manual focus slider + lens-position
+- **M0 ✅ Skeleton:** Xcode project, camera permission, live viewfinder, lens picker.
+- **M1 ✅ Manual controls:** ISO/shutter/WB lock + histogram; manual focus slider + lens-position
   readout.
-- **M2 — Focus peaking + loupe:** Metal/Core Image edge overlay and the 3× full-res focus loupe.
-- **M3 — Bracket sequencer:** Set Near/Far, 8-step monotonic sweep with settle-wait, locked
+- **M2 ✅ Focus peaking + loupe:** Metal/Core Image edge overlay and the 3× full-res focus loupe.
+- **M3 ✅ Bracket sequencer:** Set Near/Far, 8-step monotonic sweep with settle-wait, locked
   exposure, RAW capture, StackSet storage.
-- **M4 — Engine integration:** OpenCV + focus-stack compiled for arm64, `.mm` bridge, Method-B
+- **M4 ◐ Engine integration:** (compiles + links in CI; not yet enabled in the app target) OpenCV + focus-stack compiled for arm64, `.mm` bridge, Method-B
   merge + depth map, background processing.
-- **M5 — Review & export:** before/after, re-stack options, Photos export, acknowledgements.
-- **M6 — Polish:** diopter-even spacing + calibration, overlap safety factor, LiDAR distance
+- **M5 ✅ Review & export:** before/after, re-stack options, Photos export, acknowledgements.
+- **M6 ☐ Polish:** diopter-even spacing + calibration, overlap safety factor, LiDAR distance
   readout, presets.
 
 ---
@@ -361,23 +373,123 @@ re-stacked with different engine options.
 | Risk / question | Mitigation |
 | --- | --- |
 | `lensPosition` isn't linear with distance | v1 linear default; diopter-even + calibration in M6 |
-| No built-in focus peaking API | Implement with Sobel/`CIEdges` on preview frames |
-| No absolute distance except on LiDAR | Show relative scale; distance only where LiDAR exists |
-| Building OpenCV + C++ for arm64 in-app | Pin OpenCV iOS framework; isolate in `.mm` bridge; CI build |
+| ~~No built-in focus peaking API~~ | RESOLVED — `CIEdges` threshold + tint in `PreviewFrameProcessor` |
+| No absolute distance except on LiDAR | Open — lens position is shown as a relative 0–1 value; LiDAR readout not implemented |
+| ~~Building OpenCV + C++ for arm64 in-app~~ | RESOLVED — the `build-engine` CI job compiles and links it on every push |
 | GPL contamination | Only MIT/Apache-2.0 ship; Enfuse/Hugin excluded |
 | Frame-to-frame shift (focus breathing on tripod) | ECC alignment stays on to correct macro focus-breathing scale changes even when mounted; 2 s start timer damps button shake |
-| Confirming sharpness on small screen | 3× focus loupe sampling full-res feed with peaking (§6.4a) |
+| ~~Confirming sharpness on small screen~~ | RESOLVED — 3× loupe (§6.4a), plus a zebra overlay for blown highlights |
 | App Store: is on-device the only mode? | Yes — no network/cloud stacking in scope |
 
 ## 13. Testing
 
-- **Unit:** spacing math (linear + diopter), settle-detection state machine, manifest I/O.
-- **Snapshot:** peaking overlay against reference frames.
-- **Integration:** scripted near/far → 8-frame capture on a device rig; verify monotonic
-  lensPosition and constant exposure EXIF across frames.
-- **Engine golden tests:** a fixed input stack → expected merged output within tolerance;
-  depth-map sanity.
-- **Field test:** the actual fly-reel-in-light-box subject.
+**Implemented** (`ios/StackShot/Tests/`, run on every push by
+`.github/workflows/ios-tests.yml`):
+- Bracket plan spacing: inclusive endpoints, even spacing, N=1/2/8, reversed range.
+- `CaptureDefaults`: unset defaults, save/load round-trip, range clamping, shutter and
+  output-format whitelist fallbacks.
+- `StackSet` Codable: round-trip with and without a depth map, plus a legacy-manifest
+  fixture to prove forward compatibility.
+
+**CI also runs:** SwiftLint, an app build + test on a simulator, and a separate
+`build-engine` job that vendors focus-stack + OpenCV and compile-checks the
+`ENGINE_EMBEDDED` path. Test failures upload the `.xcresult` bundle as an artifact.
+
+**Not yet done — all of it device-dependent:**
+- Snapshot tests of the peaking/zebra overlays.
+- Integration test of a real bracket (monotonic lens position, constant exposure EXIF).
+- Engine golden tests: fixed input stack → expected merge within tolerance.
+- **Field test: the actual fly-reel-in-light-box subject.** This is the gating item —
+  nothing below the API surface has been observed working on hardware.
+
+---
+
+## 14. What shipped beyond this design
+
+The plan above held up; these are additions and deliberate reversals made while
+building. Each entry says *why*, so the reasoning survives even if the code changes.
+
+### 14.1 Output and export
+
+| Shipped | Rationale |
+| --- | --- |
+| **JPEG q95 output (default)** and **PNG** (lossless master) | The original plan said "saved to the photo library" without naming a format. eBay — the end destination — accepts JPEG/PNG but **not HEIC**, and a listing photo that gets edited should come off a lossless master so the editor's export is the only lossy generation. |
+| **Exact-bytes save & share** | `UIImageWriteToSavedPhotosAlbum` re-encodes; the Library path was decoding the JPEG and re-encoding it, i.e. genuinely double-compressing. Save and share now hand Photos/the share sheet the encoded file itself via `PHAssetCreationRequest`, so the image is compressed exactly once, ever. |
+| **Auto-save to Photos** (default on) | Completes the hands-off flow: frame, set anchors, one tap, finished JPEG in the library. |
+| **Real EXIF** (date, device, ISO, shutter) via `CGImageDestination` | `jpegData()`/`pngData()` strip all metadata, so outputs had no capture date and sorted by import time. |
+| **RAW frames always deleted after a successful stack** | Reverses the original "keep frames so a set can be re-stacked" design, at the user's direction. An 8-frame RAW set is ~200 MB; keeping them would consume storage for a re-stack that in practice never happens. Consequence: a disappointing stack means re-shooting, and the re-stack UI was removed (§14.4). |
+| **Files-app visibility** | `UIFileSharingEnabled` — lets masters be dragged into a desktop editor over cable, avoiding a Photos round-trip. |
+
+### 14.2 Shooting aids not in the original plan
+
+- **Live EV₁₀₀ + aperture readout** — the plan had a vague "EV meter"; this is the real
+  computation from ISO, shutter, and the active lens's aperture.
+- **Zebra overlay** — paints blown highlights red in the live preview. Chrome in a light
+  box clips readily and clipped pixels cannot be recovered in an edit. Chosen over a
+  numeric clipped-percentage readout, which conveyed the same fact less usefully.
+- **Torch toggle** — for extra illumination; resets on lens switch since the torch
+  belongs to the physical module.
+- **Gray-card white balance** — one tap locks neutral WB from the device's gray-world
+  estimate and reflects the measured Kelvin back into the slider.
+- **Focus fine-nudge buttons** (±0.005, press-and-hold) — a full-width 0–1 slider is too
+  coarse for placing anchors on a reel.
+- **1:1 crop guide** — eBay renders square thumbnails; framing for the crop before
+  spending a multi-minute stack avoids wasted captures.
+- **Sound-only capture feedback** — a tick per frame, a chime on completion.
+  **Deliberately no haptics**: vibration would shake a tripod-mounted phone during the
+  exact frames that need stillness.
+- **Persisted capture settings** — ISO, shutter, Kelvin, tint, step count, overlay
+  toggles, and output format survive relaunch, clamped to valid ranges on load.
+
+### 14.3 Robustness added after review
+
+- **Per-frame capture retry** (one attempt) — a single transient AVFoundation failure no
+  longer aborts and deletes an entire bracket.
+- **Cancel-safe cleanup** — a failed or cancelled bracket deletes its partial directory;
+  the manifest is written only on full success.
+- **Manifest-before-delete ordering** — frames are deleted only after the manifest
+  recording the result is safely on disk, so a failed write can never strand a set with
+  neither a result nor its frames.
+- **Two-pass fallback stacker** — decodes each frame twice to keep only one resident.
+  Holding all frames and all sharpness maps at once peaked at ~200 MB for 8 frames and
+  ~500 MB at the 20-frame maximum; peak is now ~40 MB regardless of count.
+- **Session lifecycle** — the capture session stops on backgrounding and, on return,
+  re-applies the exposure/WB/focus locks, which iOS can reset while another app holds
+  the camera. Pending captures are failed explicitly rather than leaking a continuation.
+- **Screen geometry passed to the frame processor** — `UIScreen` is main-thread-only and
+  the processor runs on the camera's video queue.
+
+### 14.4 Deliberately removed
+
+- **Bubble level** — built, then deleted: it read `attitude.roll`/`pitch` as tilt from
+  horizontal assuming a face-up phone, but flat-lay shooting holds the phone
+  camera-down, which would have pinned it at "not level" permanently. Redundant with
+  the crop guide; a correct version would work from the gravity vector.
+- **HEIC output** — JPEG and PNG cover upload and editing; a third encode path earned
+  nothing. (HEIF *capture* fallback for devices without RAW is unaffected.)
+- **Library re-stack + per-frame filmstrips** — unreachable once frames are always
+  deleted; the review-sheet filmstrip would have rendered empty placeholders.
+- **Clipped-percentage readout** — superseded by the zebra overlay.
+- **Corrupt-manifest warning** — UI state for a condition atomic writes make
+  effectively unreachable.
+
+### 14.5 Known technical debt
+
+1. **Depth-map export is retained as a diagnostic**, not a product feature: it is how a
+   soft band gets attributed to too-few frames versus a stacker fault. Slated for
+   removal once a capture recipe is proven over several sessions.
+2. **The C++ engine is not enabled in the app target.** `ENGINE_EMBEDDED` is commented
+   out in `project.yml`, so the Swift fallback is what runs on device today. CI proves
+   the embedded path compiles and links.
+3. **The C++ core reports no incremental progress** — its progress callback fires once,
+   on completion.
+4. **Whole-object republishing**: `CameraViewModel` is one `ObservableObject`, so
+   frame-rate updates to the viewfinder image invalidate every panel bound to it.
+   Measure on device before splitting — it may not be perceptible.
+5. **Undecodable manifests are silently skipped**, so a directory that fails to decode
+   is never reclaimed. Mitigated by only ever adding optional schema fields.
+6. **Diopter-even focus spacing** remains deferred; v1 spaces evenly in lens position,
+   which is only approximately even in real distance (§7).
 
 ---
 
