@@ -5,12 +5,17 @@ Manual-control focus-stacking camera for iOS. Blueprint: `../../docs/focus-stack
 **Status: compiles and unit-tests green in CI; never yet run on a phone.** GitHub Actions
 builds the app, runs the unit tests, and separately compile-checks the embedded C++ engine
 path on every push. On-device behaviour (focus sweep, peaking, stack quality) is still
-entirely unvalidated — the first device session is the next milestone.
+entirely unvalidated — the first device session is the next milestone, and
+[`FIRST-SESSION.md`](../../docs/focus-stack-ios/FIRST-SESSION.md) is the protocol for it:
+what to shoot, in what order, what to check at each step, and which diagnostic to read
+when something looks wrong.
 
 ## Building
 
-Requires a Mac with Xcode 16+ (current XcodeGen emits project format 77), and a
-physical iPhone (the Simulator has no camera).
+Requires a Mac with Xcode 16+ (current XcodeGen emits project format 77). A physical
+iPhone is required for anything involving the camera; the Simulator runs in **preview
+mode** (synthetic frames on a timer, marked with a red `PREVIEW · no camera` badge) so the
+UI can be exercised without hardware — but nothing it shows is real capture output.
 
 ```bash
 brew install xcodegen
@@ -29,15 +34,22 @@ Set your signing team, select your device, run.
   freezes exposure and colour for the whole stack. ISO and shutter are the camera's to
   choose and are deliberately not shown.
 - Manual focus slider with **focus peaking** (green edge overlay) and the **3× loupe**
-  (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness.
+  (pinch 2×–6×, tap the viewfinder to move it) for confirming sharpness. A yellow reticle
+  marks what the loupe is showing, and the loupe dodges to the opposite side so it never
+  covers the region it's magnifying.
+- The lens button **defaults to the closest-focusing camera** — on modern iPhones that's
+  the ultra-wide, which is the macro lens and the one you want for a reel.
 - **Set Near / Set Far** anchors → adjustable-count bracket (default 8, inclusive endpoints)
   with a 2 s start timer, per-step focus settle-wait, and RAW (DNG) capture with HEIF fallback.
 - Each capture is a StackSet folder: `manifest.json` (capture settings + frame metadata)
   plus the merged result. The RAW frames themselves are deleted once the stack succeeds.
 - **Library screen** to browse, export, and swipe-delete saved stacks, plus an
   **Acknowledgements screen** for the shipped licenses.
-- A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style,
-  no alignment) so the end-to-end flow works before the C++ engine is wired in.
+- A **native Swift fallback stacker** (per-pixel sharpest-source depth map — Method-B-style)
+  so the end-to-end flow works before the C++ engine is wired in. It is what runs on device
+  today, and two of its limits look like bugs if you don't expect them: it **downscales to
+  2048 px** on the long edge to bound memory, and it does **no alignment between frames**,
+  so rig drift shows as doubling. Both go away with the C++ engine below.
 - **Depth-map view toggle** in the review/library UI to inspect the per-pixel source map.
 - **Persisted capture settings** (EV bias, Kelvin, tint, step count, overlay toggles,
   output format) carried across app launches.
@@ -72,6 +84,12 @@ Set your signing team, select your device, run.
 - **Peaking on/off button** alongside the existing focus peaking overlay.
 - **One-tap gray-card white balance** lock using the device's gray-world estimate.
 - **Automatic cleanup** of failed or cancelled brackets so partial captures don't linger on disk.
+- **Capture log** (`capture-log.txt`) written into each stack's folder and shareable from
+  the Library detail: per frame, the target lens position, the position actually reached,
+  whether the lens settled or timed out, capture attempts used, and RAW vs HEIF — then the
+  engine, duration and output size. It's how a soft or banded stack gets diagnosed rather
+  than guessed at. [`FIRST-SESSION.md`](../../docs/focus-stack-ios/FIRST-SESSION.md) has a
+  table for reading it.
 
 ## Running tests
 
@@ -80,8 +98,13 @@ xcodegen generate
 ```
 
 then open `StackShot.xcodeproj` in Xcode and run the StackShot scheme's tests with **⌘U**.
-Unit tests cover bracket spacing, settings persistence, and manifest coding, and run on
-every push via `.github/workflows/ios-tests.yml`.
+They run on every push via `.github/workflows/ios-tests.yml`.
+
+Coverage is confined to logic that needs no camera, which is the only kind verifiable
+before the first device session: bracket spacing and inclusive endpoints, settings
+persistence and clamping, manifest coding (including manifests written before EV
+compensation existed), the shutter-readiness rule and its caption, aspect-fit geometry for
+the tap-to-loupe mapping, and the capture log's cross-instance append.
 
 ## Embedding the real engine (focus-stack + OpenCV)
 

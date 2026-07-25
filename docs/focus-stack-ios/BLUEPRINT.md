@@ -425,11 +425,15 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
 - **EV compensation replaced manual ISO and shutter.** The blueprint (§6.2) specified
   fully manual exposure via `setExposureModeCustom`. In practice a light box is a fixed
   lighting environment where the only judgement needed is "brighter or darker", so the
-  two controls were replaced by a single EV slider biasing the camera's own metering,
-  with ISO and shutter shown as a readout. The stack-critical invariant is preserved by
-  **Lock**, which freezes metering (`exposureMode = .locked`) after it settles — every
+  two controls were replaced by a single EV slider biasing the camera's own metering.
+  ISO and shutter are not surfaced at all — they are the camera's to choose, and the
+  owner explicitly did not want them on screen. The stack-critical invariant is preserved
+  by **Lock**, which freezes metering (`exposureMode = .locked`) after it settles — every
   frame in a bracket still shares one exposure, and the metered values are what land in
   the manifest and EXIF. Net effect: three controls became one.
+  The range is **positive-only (0…+3, third-stop detents)**: a light box is mostly white
+  field, so the meter reads it as overexposure and darkens the subject — the correction is
+  always upward, and offering negative bias would only invite a wrong turn.
 - **Zebra overlay** — paints blown highlights red in the live preview. Chrome in a light
   box clips readily and clipped pixels cannot be recovered in an edit. Chosen over a
   numeric clipped-percentage readout, which conveyed the same fact less usefully.
@@ -444,8 +448,16 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
 - **Sound-only capture feedback** — a tick per frame, a chime on completion.
   **Deliberately no haptics**: vibration would shake a tripod-mounted phone during the
   exact frames that need stillness.
-- **Persisted capture settings** — ISO, shutter, Kelvin, tint, step count, overlay
-  toggles, and output format survive relaunch, clamped to valid ranges on load.
+- **Persisted capture settings** — EV bias, Kelvin, tint, step count, overlay toggles,
+  and output format survive relaunch, clamped to valid ranges on load.
+- **Closest-focusing lens selected by default** — on modern iPhones the ultra-wide *is*
+  the macro lens, so picking the lens with the smallest `minimumFocusDistance` lands on
+  the right one for a reel without the owner having to know that. Lens selection collapsed
+  from a chip per camera to one button that cycles them, showing the device's own name.
+- **Loupe reticle and dodge** — a yellow reticle marks the point being magnified, and the
+  loupe sits on the side opposite it. The dodge is horizontal only: the bottom of the
+  screen belongs to the control panel, so dodging downward would trade one occlusion for
+  a worse one.
 
 ### 14.3 Robustness added after review
 
@@ -464,6 +476,30 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
   the camera. Pending captures are failed explicitly rather than leaking a continuation.
 - **Screen geometry passed to the frame processor** — `UIScreen` is main-thread-only and
   the processor runs on the camera's video queue.
+
+### 14.3a Built because the app has never run on a phone
+
+The whole codebase was written without a device. These three exist to make the first
+session diagnosable rather than a guessing game.
+
+- **Capture log** (`capture-log.txt`, written into each StackSet folder, shareable from
+  the Library detail). Per frame: target lens position, position actually reached, whether
+  the lens settled or timed out, capture attempts used, RAW vs HEIF, elapsed time — then a
+  closing line with the engine, duration and output size. This is the difference between
+  "the stack looks soft" and "frames 5–8 timed out before reaching focus".
+  Deliberately dependency-free and unable to affect capture: every failure in it is
+  swallowed, because a logging bug must never become a bracket failure. A second
+  `CaptureLog` opened over the same folder re-reads and extends the file, so the bracket
+  and the stacking pass write one continuous record.
+- **Simulator preview mode** — synthetic frames on a timer when no camera exists, so the
+  UI can be exercised without hardware. Flagged with an unmissable red
+  `PREVIEW · no camera` badge, because a good-looking synthetic frame is exactly the thing
+  that could be mistaken for real capture output.
+- **`CaptureReadiness`** — the shutter's enabled state and the caption naming what's still
+  missing are two renderings of one decision. Computed separately (as they were, in the
+  view model and privately inside the button) they could drift into a greyed-out shutter
+  whose caption says everything is ready. Extracting them made the rule testable, which is
+  the point: it is one of the few things verifiable without a device.
 
 ### 14.4 Deliberately removed
 
@@ -486,7 +522,11 @@ building. Each entry says *why*, so the reasoning survives even if the code chan
    removal once a capture recipe is proven over several sessions.
 2. **The C++ engine is not enabled in the app target.** `ENGINE_EMBEDDED` is commented
    out in `project.yml`, so the Swift fallback is what runs on device today. CI proves
-   the embedded path compiles and links.
+   the embedded path compiles and links, and `scripts/fetch_engine.sh` generates a second
+   project (`StackShotEngine.xcodeproj`) that has it switched on. Two consequences worth
+   stating plainly, because both look like bugs in a first stack: the fallback
+   **downscales to 2048 px** on the long edge to bound memory, and it does **no alignment
+   between frames**, so any rig drift shows as doubling rather than being corrected.
 3. **The C++ core reports no incremental progress** — its progress callback fires once,
    on completion.
 4. **Whole-object republishing**: `CameraViewModel` is one `ObservableObject`, so
