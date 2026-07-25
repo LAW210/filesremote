@@ -28,8 +28,7 @@ struct ReviewSheet: View {
                 }
 
                 if let set = vm.lastSet {
-                    Text("\(set.frames.count) frames · ISO \(Int(set.exposure.iso)) · " +
-                         "1/\(Int(1 / set.exposure.shutterSeconds)) s · \(Int(set.whiteBalance.kelvin))K")
+                    Text(set.captureSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -52,10 +52,8 @@ struct LibraryScreen: View {
     }
 
     private func thumbnailURL(for set: StackSet) -> URL? {
-        if let result = set.result {
-            return StackStore.shared.directory(for: set).appendingPathComponent(result.mergedFileName)
-        }
-        return set.frames.first.map { StackStore.shared.frameURL(set, $0) }
+        StackingService.shared.mergedFileURL(for: set)
+            ?? set.frames.first.map { StackStore.shared.frameURL(set, $0) }
     }
 }
 
@@ -86,8 +84,7 @@ struct StackSetDetail: View {
                         .toggleStyle(.button)
                 }
 
-                Text("\(set.frames.count) frames · ISO \(Int(set.exposure.iso)) · " +
-                     "1/\(Int(1 / set.exposure.shutterSeconds)) s · \(Int(set.whiteBalance.kelvin))K")
+                Text(set.captureSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

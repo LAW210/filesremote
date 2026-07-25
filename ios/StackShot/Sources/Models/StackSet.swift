@@ -20,8 +20,7 @@ struct StackSet: Codable, Identifiable {
         var spacingMode: String
     }
 
-    struct Frame: Codable, Identifiable {
-        var id: Int { index }
+    struct Frame: Codable {
         var index: Int
         var lensPosition: Float
         /// Relative to the StackSet directory.
@@ -48,6 +47,12 @@ struct StackSet: Codable, Identifiable {
     /// Non-nil once stacking succeeded. Source frames are always deleted at that
     /// point, so a set with a result is final — its frame files no longer exist.
     var result: Result?
+
+    /// One-line capture summary shared by the review sheet and the library detail.
+    var captureSummary: String {
+        "\(frames.count) frames · ISO \(Int(exposure.iso)) · " +
+        "1/\(Int(1 / exposure.shutterSeconds)) s · \(Int(whiteBalance.kelvin))K"
+    }
 }
 
 /// Persists StackSets as folders of frames + manifest.json in the app sandbox.

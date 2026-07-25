@@ -5,12 +5,10 @@ import UIKit
 /// and a video data output that feeds the viewfinder, focus peaking, and the loupe.
 final class CameraService: NSObject {
 
-    struct Lens: Identifiable, Equatable {
+    struct Lens: Identifiable {
         let id: String
         let name: String            // "0.5x", "1x", "3x"
         let device: AVCaptureDevice
-
-        static func == (lhs: Lens, rhs: Lens) -> Bool { lhs.id == rhs.id }
     }
 
     let session = AVCaptureSession()
@@ -96,7 +94,16 @@ final class CameraService: NSObject {
         let previous = videoInput
         if let previous { session.removeInput(previous) }
         guard session.canAddInput(input) else {
-            if let previous, session.canAddInput(previous) { session.addInput(previous) }
+            if let previous, session.canAddInput(previous) {
+                session.addInput(previous)
+            } else {
+                // Even the previously working input won't go back (device dropped, or
+                // the session is in a bad state). Don't keep reporting a lens that
+                // isn't attached — clear our state so callers see the truth and can
+                // recover by selecting a lens again.
+                videoInput = nil
+                currentLens = nil
+            }
             throw CameraError.configurationFailed
         }
         session.addInput(input)
@@ -154,7 +161,7 @@ final class CameraService: NSObject {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         let fmt = device.activeFormat
-        let clampedISO = min(max(iso, fmt.minISO), fmt.maxISO)
+        let clampedISO = iso.clamped(to: fmt.minISO...fmt.maxISO)
         let duration = CMTime(seconds: shutterSeconds, preferredTimescale: 1_000_000)
         let clampedDuration = CMTimeClampToRange(
             duration,
@@ -168,12 +175,19 @@ final class CameraService: NSObject {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         let tt = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(temperature: kelvin, tint: tint)
-        var gains = device.deviceWhiteBalanceGains(for: tt)
-        let maxGain = device.maxWhiteBalanceGain
-        gains.redGain = min(max(gains.redGain, 1), maxGain)
-        gains.greenGain = min(max(gains.greenGain, 1), maxGain)
-        gains.blueGain = min(max(gains.blueGain, 1), maxGain)
+        let gains = Self.clampedGains(device.deviceWhiteBalanceGains(for: tt), for: device)
         device.setWhiteBalanceModeLocked(with: gains)
+    }
+
+    /// Gains outside 1...maxWhiteBalanceGain make `setWhiteBalanceModeLocked` raise.
+    private static func clampedGains(_ gains: AVCaptureDevice.WhiteBalanceGains,
+                                     for device: AVCaptureDevice) -> AVCaptureDevice.WhiteBalanceGains {
+        let limit = 1...device.maxWhiteBalanceGain
+        var clamped = gains
+        clamped.redGain = gains.redGain.clamped(to: limit)
+        clamped.greenGain = gains.greenGain.clamped(to: limit)
+        clamped.blueGain = gains.blueGain.clamped(to: limit)
+        return clamped
     }
 
     /// Locks white balance using the device's gray-world estimate. Point the camera at a
@@ -182,11 +196,7 @@ final class CameraService: NSObject {
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        var gains = device.grayWorldDeviceWhiteBalanceGains
-        let maxGain = device.maxWhiteBalanceGain
-        gains.redGain = min(max(gains.redGain, 1), maxGain)
-        gains.greenGain = min(max(gains.greenGain, 1), maxGain)
-        gains.blueGain = min(max(gains.blueGain, 1), maxGain)
+        let gains = Self.clampedGains(device.grayWorldDeviceWhiteBalanceGains, for: device)
         device.setWhiteBalanceModeLocked(with: gains)
         let tt = device.temperatureAndTintValues(for: gains)
         return (tt.temperature, tt.tint)
@@ -210,7 +220,7 @@ final class CameraService: NSObject {
         guard let device else { throw CameraError.noCamera }
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        device.setFocusModeLocked(lensPosition: min(max(lensPosition, 0), 1))
+        device.setFocusModeLocked(lensPosition: lensPosition.clamped(to: 0...1))
     }
 
     /// Waits until the lens has physically settled near the requested position.

@@ -194,8 +194,8 @@ final class CameraViewModel: ObservableObject {
     func lockGrayCardWB() {
         do {
             let result = try camera.lockNeutralWhiteBalance()
-            kelvin = min(max(result.kelvin, AppConfig.Exposure.kelvinRange.lowerBound), AppConfig.Exposure.kelvinRange.upperBound)
-            tint = min(max(result.tint, AppConfig.Exposure.tintRange.lowerBound), AppConfig.Exposure.tintRange.upperBound)
+            kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
+            tint = result.tint.clamped(to: AppConfig.Exposure.tintRange)
             persistDefaults()
         } catch {
             report(error)
@@ -240,8 +240,7 @@ final class CameraViewModel: ObservableObject {
     }
 
     func setLoupeMagnification(_ m: CGFloat) {
-        let range = AppConfig.Loupe.magnificationRange
-        preview.update { $0.loupeMagnification = min(max(m, range.lowerBound), range.upperBound) }
+        preview.update { $0.loupeMagnification = m.clamped(to: AppConfig.Loupe.magnificationRange) }
     }
 
     func markNear() { nearAnchor = lensPosition }

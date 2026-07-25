@@ -65,13 +65,9 @@ struct ViewfinderScreen: View {
     /// Maps a tap on the aspect-fit viewfinder to normalized (0–1) image coordinates,
     /// accounting for letterbox bars.
     private func normalizedPoint(tap: CGPoint, in viewSize: CGSize, imageSize: CGSize) -> CGPoint {
-        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        let origin = CGPoint(x: (viewSize.width - fitted.width) / 2,
-                             y: (viewSize.height - fitted.height) / 2)
-        let x = (tap.x - origin.x) / fitted.width
-        let y = (tap.y - origin.y) / fitted.height
-        return CGPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+        let fitted = CGRect.aspectFit(imageSize, in: viewSize)
+        return CGPoint(x: ((tap.x - fitted.minX) / fitted.width).clamped(to: 0...1),
+                       y: ((tap.y - fitted.minY) / fitted.height).clamped(to: 0...1))
     }
 
     private var topBar: some View {
@@ -141,19 +137,16 @@ struct SquareCropGuide: View {
     let imageSize: CGSize
 
     var body: some View {
-        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
-        let fitted = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        let origin = CGPoint(x: (viewSize.width - fitted.width) / 2,
-                             y: (viewSize.height - fitted.height) / 2)
+        let fitted = CGRect.aspectFit(imageSize, in: viewSize)
         let side = min(fitted.width, fitted.height)
-        let square = CGRect(x: origin.x + (fitted.width - side) / 2,
-                            y: origin.y + (fitted.height - side) / 2,
+        let square = CGRect(x: fitted.minX + (fitted.width - side) / 2,
+                            y: fitted.minY + (fitted.height - side) / 2,
                             width: side, height: side)
 
         ZStack {
             // Dim everything the square crop would discard.
             Path { path in
-                path.addRect(CGRect(origin: origin, size: fitted))
+                path.addRect(fitted)
                 path.addRect(square)
             }
             .fill(.black.opacity(0.45), style: FillStyle(eoFill: true))
@@ -205,7 +198,7 @@ struct LoupeView: View {
         .gesture(
             MagnificationGesture()
                 .onChanged { value in
-                    magnification = min(max(gestureBase * value, range.lowerBound), range.upperBound)
+                    magnification = (gestureBase * value).clamped(to: range)
                     vm.setLoupeMagnification(magnification)
                 }
                 .onEnded { _ in gestureBase = magnification }

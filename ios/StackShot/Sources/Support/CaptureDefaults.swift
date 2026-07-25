@@ -128,9 +128,3 @@ struct CaptureDefaults {
         defaults.set(squareGuideEnabled, forKey: Key.squareGuideEnabled)
     }
 }
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
-    }
-}

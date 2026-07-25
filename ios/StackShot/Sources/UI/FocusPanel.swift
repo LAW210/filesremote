@@ -10,7 +10,7 @@ struct FocusPanel: View {
             HStack {
                 Text("NEAR").font(.caption2)
                 Button {
-                    vm.lensPosition = min(max(vm.lensPosition - 0.005, 0), 1)
+                    vm.lensPosition = (vm.lensPosition - 0.005).clamped(to: 0...1)
                 } label: {
                     Image(systemName: "minus.circle")
                 }
@@ -20,7 +20,7 @@ struct FocusPanel: View {
                 Slider(value: $vm.lensPosition, in: 0...1)
 
                 Button {
-                    vm.lensPosition = min(max(vm.lensPosition + 0.005, 0), 1)
+                    vm.lensPosition = (vm.lensPosition + 0.005).clamped(to: 0...1)
                 } label: {
                     Image(systemName: "plus.circle")
                 }
