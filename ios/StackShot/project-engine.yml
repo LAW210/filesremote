@@ -18,11 +18,15 @@ targets:
     sources:
       - Sources
       - Bridge
+      # Exclude the CLI entry point and every GoogleTest-dependent file — gtest is
+      # never vendored, and both main.cc and gtest_main.cc define their own main().
       - path: Vendor/focus-stack/src
         excludes:
           - "main.cc"
+          - "gtest_main.cc"
           - "*_tests.cc"
           - "*_test.cc"
+          - "gtest*"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lawsecurity.stackshot
