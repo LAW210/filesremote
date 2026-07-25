@@ -39,12 +39,18 @@ struct ReviewSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    // Shares the exact JPEG file on disk — same bytes eBay receives.
+                    if let url = vm.mergedFileURL {
+                        ShareLink(item: url)
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(saved ? "Saved ✓" : "Save to Photos") {
                         vm.saveResultToPhotos()
                         saved = true
                     }
-                    .disabled(vm.resultImage == nil || saved)
+                    .disabled(vm.mergedFileURL == nil || saved)
                 }
             }
         }

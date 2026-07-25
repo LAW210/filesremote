@@ -55,12 +55,10 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    // Output settings (Settings sheet): stacked-image format and whether the
-    // source RAW frames survive a successful stack.
+    // Output settings (Settings sheet): stacked-image format. Source RAW frames are
+    // always deleted once the stacked image is safely on disk — by design, only the
+    // final image is kept.
     @Published var outputFormat: AppConfig.Stacking.OutputFormat {
-        didSet { persistDefaultsIfLoaded() }
-    }
-    @Published var keepFrames: Bool {
         didSet { persistDefaultsIfLoaded() }
     }
 
@@ -96,7 +94,6 @@ final class CameraViewModel: ObservableObject {
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
         _outputFormat = Published(initialValue: defaults.outputFormat)
-        _keepFrames = Published(initialValue: defaults.keepFrames)
         isLoaded = true
     }
 
@@ -172,8 +169,7 @@ final class CameraViewModel: ObservableObject {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
-            outputFormat: outputFormat,
-            keepFrames: keepFrames
+            outputFormat: outputFormat
         ).save()
     }
 
@@ -245,7 +241,7 @@ final class CameraViewModel: ObservableObject {
         let (updated, output) = try await stacking.stackAndPersist(
             set,
             outputFormat: outputFormat,
-            deleteFramesAfter: !keepFrames) { p in
+            deleteFramesAfter: true) { p in
             Task { @MainActor in self.phase = .stacking(p) }
         }
         resultImage = output.merged
@@ -254,9 +250,21 @@ final class CameraViewModel: ObservableObject {
         phase = .done
     }
 
+    /// URL of the last stack's merged file — the exact encoded bytes on disk.
+    var mergedFileURL: URL? {
+        lastSet.flatMap { stacking.mergedFileURL(for: $0) }
+    }
+
+    /// Saves the merged FILE to Photos (no re-encode — see StackingService.saveFileToPhotos).
     func saveResultToPhotos() {
-        guard let image = resultImage else { return }
-        stacking.saveToPhotos(image)
+        guard let url = mergedFileURL else { return }
+        Task {
+            do {
+                try await stacking.saveFileToPhotos(url)
+            } catch {
+                report(error)
+            }
+        }
     }
 
     func resetForNextStack() {

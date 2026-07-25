@@ -11,7 +11,6 @@ struct CaptureDefaults {
     var stepCount: Int
     var peakingEnabled: Bool
     var outputFormat: AppConfig.Stacking.OutputFormat
-    var keepFrames: Bool
 
     private enum Key {
         static let iso = "capture.iso"
@@ -21,7 +20,6 @@ struct CaptureDefaults {
         static let stepCount = "capture.stepCount"
         static let peakingEnabled = "capture.peakingEnabled"
         static let outputFormat = "capture.outputFormat"
-        static let keepFrames = "capture.keepFrames"
     }
 
     /// Loads persisted values, clamping to `AppConfig` ranges and falling back to
@@ -75,13 +73,6 @@ struct CaptureDefaults {
         let outputFormat = (defaults.string(forKey: Key.outputFormat)
             .flatMap(AppConfig.Stacking.OutputFormat.init(rawValue:))) ?? .jpeg
 
-        let keepFrames: Bool
-        if let stored = defaults.object(forKey: Key.keepFrames) as? Bool {
-            keepFrames = stored
-        } else {
-            keepFrames = true
-        }
-
         return CaptureDefaults(
             iso: iso,
             shutterDenominator: shutterDenominator,
@@ -89,8 +80,7 @@ struct CaptureDefaults {
             tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
-            outputFormat: outputFormat,
-            keepFrames: keepFrames
+            outputFormat: outputFormat
         )
     }
 
@@ -103,7 +93,6 @@ struct CaptureDefaults {
         defaults.set(stepCount, forKey: Key.stepCount)
         defaults.set(peakingEnabled, forKey: Key.peakingEnabled)
         defaults.set(outputFormat.rawValue, forKey: Key.outputFormat)
-        defaults.set(keepFrames, forKey: Key.keepFrames)
     }
 }
 

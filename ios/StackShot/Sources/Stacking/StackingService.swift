@@ -1,3 +1,4 @@
+import Photos
 import UIKit
 
 /// The single path from "captured StackSet" to "persisted merged result".
@@ -89,8 +90,31 @@ final class StackingService {
         return UIImage(contentsOfFile: url.path)
     }
 
-    func saveToPhotos(_ image: UIImage) {
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+    /// URL of the merged file on disk, if the set has been stacked.
+    func mergedFileURL(for set: StackSet) -> URL? {
+        guard let result = set.result else { return nil }
+        return store.directory(for: set).appendingPathComponent(result.mergedFileName)
+    }
+
+    /// Adds the merged file to the photo library AS-IS — the exact encoded bytes go in,
+    /// with no decode/re-encode pass, so the quality-90 JPEG is never compressed twice.
+    func saveFileToPhotos(_ url: URL) async throws {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized else { throw PhotosSaveError.notAuthorized }
+        try await PHPhotoLibrary.shared().performChanges {
+            let request = PHAssetCreationRequest.forAsset()
+            request.addResource(with: .photo, fileURL: url, options: nil)
+        }
+    }
+}
+
+enum PhotosSaveError: LocalizedError {
+    case notAuthorized
+
+    var errorDescription: String? {
+        switch self {
+        case .notAuthorized: return "Photo library access was not granted."
+        }
     }
 }
 

@@ -102,4 +102,9 @@ final class StackStore {
     func frameURL(_ set: StackSet, _ frame: StackSet.Frame) -> URL {
         directory(for: set).appendingPathComponent(frame.fileName)
     }
+
+    /// Removes the set's entire directory (frames, merged result, manifest).
+    func delete(_ set: StackSet) {
+        try? FileManager.default.removeItem(at: directory(for: set))
+    }
 }

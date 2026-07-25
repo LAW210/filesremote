@@ -20,6 +20,10 @@ struct LibraryScreen: View {
                     row(for: set)
                 }
             }
+            .onDelete { offsets in
+                for index in offsets { StackStore.shared.delete(sets[index]) }
+                sets.remove(atOffsets: offsets)
+            }
             if corruptCount > 0 {
                 Label("\(corruptCount) stack(s) could not be read", systemImage: "exclamationmark.triangle")
                     .font(.caption)
@@ -112,11 +116,20 @@ struct StackSetDetail: View {
                     .disabled(stacking)
                 }
 
-                if let merged {
-                    Button("Save to Photos") {
-                        service.saveToPhotos(merged)
+                // File-based save/share: the exact encoded bytes, never re-compressed.
+                if merged != nil, let url = service.mergedFileURL(for: set) {
+                    HStack(spacing: 12) {
+                        Button("Save to Photos") {
+                            Task {
+                                do { try await service.saveFileToPhotos(url) }
+                                catch { errorText = error.localizedDescription }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        ShareLink(item: url)
+                            .buttonStyle(.bordered)
                     }
-                    .buttonStyle(.bordered)
                 }
 
                 if let errorText {

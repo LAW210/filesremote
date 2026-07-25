@@ -25,14 +25,11 @@ struct SettingsSheet: View {
                 }
 
                 Section {
-                    Toggle("Keep RAW frames after stacking", isOn: $vm.keepFrames)
-                } footer: {
-                    Text(vm.keepFrames
-                         ? "The source RAW (DNG) frames stay in the library so you can " +
-                           "re-stack later with different settings."
-                         : "The source frames are deleted once the stacked image is " +
-                           "safely saved — only the final image remains, and that " +
-                           "stack can no longer be re-processed.")
+                    Label("Source RAW frames are deleted automatically once the stacked " +
+                          "image is safely saved — only the final image is kept.",
+                          systemImage: "trash")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                 }
             }
             .navigationTitle("Settings")
