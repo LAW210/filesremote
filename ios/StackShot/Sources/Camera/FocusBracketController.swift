@@ -76,7 +76,24 @@ final class FocusBracketController {
             try camera.setFocus(lensPosition: pos)
             await camera.waitForFocusSettle(target: pos)
 
-            let (data, isRAW) = try await camera.capturePhoto()
+            // One transient-failure retry per frame: a single AVFoundation hiccup
+            // shouldn't cost the whole bracket (which cleanup would then delete).
+            var captured: (data: Data, isRAW: Bool)?
+            var lastError: Error?
+            for attempt in 0..<2 {
+                if isCancelled { throw CancellationError() }
+                do {
+                    if attempt > 0 { await camera.waitForFocusSettle(target: pos) }
+                    captured = try await camera.capturePhoto()
+                    lastError = nil
+                    break
+                } catch {
+                    lastError = error
+                }
+            }
+            guard let (data, isRAW) = captured else {
+                throw lastError ?? CameraError.captureFailed
+            }
             let fileName = String(format: "frame_%02d.%@", i, isRAW ? "dng" : "heic")
             try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
 

@@ -39,6 +39,14 @@ Set your signing team, select your device, run.
   for edit-then-export workflows)**, or HEIC for smaller files.
 - **Torch toggle** in the focus panel for extra illumination (full brightness; resets on
   lens switch).
+- **Per-frame capture retry**: one transient AVFoundation failure no longer aborts (and
+  deletes) the whole bracket.
+- **Sound-only capture feedback** — a tick per frame and a chime when the stack is done.
+  Deliberately no haptics: vibration would shake the tripod during exposure.
+- **Highlight-clipping readout** beside the histogram (orange above 1%) — chrome in a
+  light box blows highlights easily, and clipped pixels are unrecoverable in the edit.
+- **EXIF on the stacked file** (capture date, device, ISO, shutter) via CGImageDestination,
+  so outputs date and attribute correctly in Photos and editors.
 - **RAW frames are deleted automatically** once the stacked image is safely written —
   only the final image is kept (so stacks can't be re-processed; re-shoot instead).
 - **Exact-bytes save & share**: Save to Photos and the share sheet both use the encoded

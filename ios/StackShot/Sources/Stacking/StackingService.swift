@@ -1,5 +1,7 @@
+import ImageIO
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
 /// The single path from "captured StackSet" to "persisted merged result".
 /// Both the live capture flow and library re-stacking go through here, so the
@@ -30,7 +32,7 @@ final class StackingService {
         let output = try await engine.stack(frameURLs: urls, progress: progress)
 
         var updated = set
-        if let data = encode(output.merged, as: outputFormat) {
+        if let data = encode(output.merged, as: outputFormat, describing: set) {
             let fileName = outputFormat.mergedFileName
             try data.write(to: store.directory(for: set).appendingPathComponent(fileName),
                            options: .atomic)
@@ -69,7 +71,58 @@ final class StackingService {
         return (updated, output)
     }
 
-    private func encode(_ image: UIImage, as format: AppConfig.Stacking.OutputFormat) -> Data? {
+    /// Encodes via CGImageDestination so real EXIF/TIFF metadata (capture date, device,
+    /// ISO, shutter) rides along — UIImage's jpegData()/pngData() strip everything,
+    /// leaving files that Photos and editors can't date or attribute.
+    private func encode(_ image: UIImage,
+                        as format: AppConfig.Stacking.OutputFormat,
+                        describing set: StackSet) -> Data? {
+        guard let cg = image.cgImage else { return fallbackEncode(image, as: format) }
+
+        let type: UTType
+        switch format {
+        case .jpeg: type = .jpeg
+        case .png: type = .png
+        case .heic: type = .heic
+        }
+
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data as CFMutableData, type.identifier as CFString, 1, nil) else {
+            return fallbackEncode(image, as: format)
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy:MM:dd HH:mm:ss"     // EXIF date format
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        let dateString = formatter.string(from: set.createdAt)
+
+        var properties: [CFString: Any] = [
+            kCGImagePropertyExifDictionary: [
+                kCGImagePropertyExifISOSpeedRatings: [Int(set.exposure.iso)],
+                kCGImagePropertyExifExposureTime: set.exposure.shutterSeconds,
+                kCGImagePropertyExifDateTimeOriginal: dateString,
+                kCGImagePropertyExifDateTimeDigitized: dateString,
+            ] as [CFString: Any],
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFMake: "Apple",
+                kCGImagePropertyTIFFModel: set.deviceModel,
+                kCGImagePropertyTIFFDateTime: dateString,
+            ] as [CFString: Any],
+        ]
+        if format != .png {
+            properties[kCGImageDestinationLossyCompressionQuality] = AppConfig.Stacking.jpegQuality
+        }
+
+        CGImageDestinationAddImage(destination, cg, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            return fallbackEncode(image, as: format)
+        }
+        return data as Data
+    }
+
+    /// Metadata-less fallback if CGImageDestination can't handle the input.
+    private func fallbackEncode(_ image: UIImage, as format: AppConfig.Stacking.OutputFormat) -> Data? {
         switch format {
         case .jpeg: return image.jpegData(compressionQuality: AppConfig.Stacking.jpegQuality)
         case .png: return image.pngData()

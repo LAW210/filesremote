@@ -1,0 +1,25 @@
+# SwiftLint config for StackShot. Defaults mostly apply; tuned so warnings inform
+# without failing CI (only lint *errors* fail the job).
+included:
+  - Sources
+  - Tests
+
+disabled_rules:
+  - todo
+  - trailing_comma
+
+line_length:
+  warning: 140
+  error: 220
+
+identifier_name:
+  min_length: 1        # p, t, cg, ev etc. are idiomatic in imaging math
+
+type_body_length:
+  warning: 400
+
+function_body_length:
+  warning: 80
+
+file_length:
+  warning: 600

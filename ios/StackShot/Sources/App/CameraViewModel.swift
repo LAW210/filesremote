@@ -1,3 +1,4 @@
+import AudioToolbox
 import SwiftUI
 import UIKit
 
@@ -22,6 +23,7 @@ final class CameraViewModel: ObservableObject {
     @Published var loupeImage: UIImage?
     @Published var loupeVisible = false
     @Published var histogram: [Float] = []
+    @Published var clippedFraction: Float = 0
     @Published var errorMessage: String?
 
     // Lens
@@ -123,6 +125,7 @@ final class CameraViewModel: ObservableObject {
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
                     self.histogram = output.histogram
+                    self.clippedFraction = output.clippedFraction
                 }
             }
             preview.update { $0.peakingEnabled = peakingEnabled }
@@ -247,7 +250,9 @@ final class CameraViewModel: ObservableObject {
                     Task { @MainActor in
                         switch p {
                         case .startingTimer(let s): self.phase = .countdown(s)
-                        case .capturing(let f, let n): self.phase = .capturing(frame: f, of: n)
+                        case .capturing(let f, let n):
+                            self.phase = .capturing(frame: f, of: n)
+                            self.playFrameTick()
                         case .done: break
                         }
                     }
@@ -288,6 +293,7 @@ final class CameraViewModel: ObservableObject {
             }
         }
         phase = .done
+        playCompletionSound()
     }
 
     /// URL of the last stack's merged file — the exact encoded bytes on disk.
@@ -328,6 +334,21 @@ final class CameraViewModel: ObservableObject {
         default:
             break
         }
+    }
+
+    // MARK: - Audio feedback
+
+    // Sound ONLY — deliberately no haptics: vibration would micro-shake the
+    // tripod-mounted phone during the exact frames that need stillness.
+
+    /// Soft tick as each bracket frame starts.
+    private func playFrameTick() {
+        AudioServicesPlaySystemSound(1057)
+    }
+
+    /// Distinct chime when the stacked result is ready.
+    private func playCompletionSound() {
+        AudioServicesPlaySystemSound(1025)
     }
 
     // MARK: - Errors

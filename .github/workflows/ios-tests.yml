@@ -21,8 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install xcodegen
-        run: brew install xcodegen
+      - name: Install tools
+        run: brew install xcodegen swiftlint
+
+      # Warnings annotate the PR; only lint errors fail the job.
+      - name: SwiftLint
+        working-directory: ios/StackShot
+        run: swiftlint lint --reporter github-actions-logging
 
       - name: Generate Xcode project
         working-directory: ios/StackShot
