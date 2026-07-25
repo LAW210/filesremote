@@ -23,9 +23,7 @@ struct CaptureDefaults {
     /// Loads persisted values, clamping to `AppConfig` ranges and falling back to
     /// sensible defaults when unset (`UserDefaults`'s numeric accessors return 0 for
     /// missing keys, so `object(forKey:)` is used to distinguish "unset" from "stored").
-    static func load() -> CaptureDefaults {
-        let defaults = UserDefaults.standard
-
+    static func load(from defaults: UserDefaults = .standard) -> CaptureDefaults {
         let iso: Float
         if let stored = defaults.object(forKey: Key.iso) as? Float {
             iso = stored.clamped(to: AppConfig.Exposure.isoRange)
@@ -80,8 +78,7 @@ struct CaptureDefaults {
     }
 
     /// Writes the current values back to `UserDefaults.standard`.
-    func save() {
-        let defaults = UserDefaults.standard
+    func save(to defaults: UserDefaults = .standard) {
         defaults.set(iso, forKey: Key.iso)
         defaults.set(shutterDenominator, forKey: Key.shutterDenominator)
         defaults.set(kelvin, forKey: Key.kelvin)

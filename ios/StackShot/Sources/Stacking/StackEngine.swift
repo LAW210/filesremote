@@ -1,4 +1,3 @@
-import CoreImage
 import UIKit
 
 /// The result of a stacking run: the merged image plus an optional depth map

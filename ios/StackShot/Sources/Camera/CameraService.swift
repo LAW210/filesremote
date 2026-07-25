@@ -1,5 +1,4 @@
 import AVFoundation
-import CoreImage
 import UIKit
 
 /// Wraps AVCaptureSession: lens selection, manual focus/exposure/white balance, RAW capture,

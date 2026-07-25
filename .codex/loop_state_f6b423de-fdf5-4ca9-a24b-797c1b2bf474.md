@@ -14,7 +14,18 @@
 
 ## Technical Debt
 
-(none yet)
+Logged by the iteration-3 maintenance sweep (complex; not fixed passively):
+1. NativeDepthMapStacker.swift:9 — no frame alignment before compositing; handheld
+   captures will ghost (embedded C++ engine adds ECC; fallback documents the limit).
+2. FocusBracketController.swift:69 — a mid-bracket capture failure leaves orphaned
+   frame files/directory with no cleanup.
+3. StackSet.swift:81 (StackStore.loadAll) — corrupt manifests silently vanish (try?).
+4. CameraService.swift:210 — .restricted vs .denied camera permission collapsed into
+   one generic error message.
+5. StackEngine.swift:70 — C++ engine depth map uses a fixed tmp path; concurrent
+   stacking runs would race on it.
+6. PreviewFrameProcessor.swift:104 — per-frame CPU histogram on the video queue is a
+   potential throughput bottleneck at sustained frame rates.
 
 ## Skipped
 
@@ -35,24 +46,27 @@ whitelisted) + CameraViewModel init/load + persistence on lock, stepCount, and n
 peakingEnabled (synced to preview processor). Verification: clean on first pass, 0 retries.
 Note: peakingEnabled has no UI control yet — picked up in iteration 4.
 
-## Iteration 3 — Unit test target + maintenance sweep (iteration % 3 == 0)
+## Iteration 3 — Unit test target + maintenance sweep ✅
+Shipped: StackShotTests target + scheme in project.yml; 3 XCTest suites (bracket plan
+spacing/endpoints, CaptureDefaults roundtrip/clamping with injectable UserDefaults,
+StackSet Codable incl. legacy-manifest fixture). Sweep: 2 unused imports removed, 1 doc
+drift fixed, 6 items logged as Technical Debt. Verification: clean, 0 retries. Tests are
+desk-verified only — first `xcodebuild test` run happens on the user's Mac.
+
+## Iteration 4 — Peaking control + gray-card white balance
 
 **Plan (finalized):**
-1. Add `StackShotTests` unit-test target to project.yml (XcodeGen `type: bundle.unit-test`,
-   depends on the app target).
-2. New `Tests/` sources (pure logic, no camera hardware needed):
-   - FocusBracketPlanTests: inclusive endpoints, even spacing, N=1/2/8 edge cases,
-     reversed near>far, count matches stepCount.
-   - CaptureDefaultsTests: load defaults when unset, roundtrip save/load, clamping of
-     out-of-range persisted values, shutter whitelist fallback (use a cleared
-     UserDefaults suite name to isolate — requires CaptureDefaults to accept an
-     injectable UserDefaults instance, defaulting to .standard; this small seam IS in
-     scope).
-   - StackSetCodableTests: manifest roundtrip incl. nil/non-nil depthMapFileName and
-     decoding a legacy JSON fixture without the field.
-3. Maintenance sweep (passive, no business-logic changes): scan ios/StackShot for
-   unused imports, typos in comments/strings, dead code, stale doc comments
-   (e.g. StackingService doc still says "returns the updated set + image" — now
-   output). Log anything non-trivial as Technical Debt instead of fixing.
+1. FocusPanel: add a "Peaking" toggle button (same `.toggleStyle(.button)` pattern as
+   the loupe toggle) bound to the persisted vm.peakingEnabled added in iteration 2.
+2. Gray-card WB: CameraService gains `func lockNeutralWhiteBalance() throws ->
+   (kelvin: Float, tint: Float)`: reads `device.grayWorldDeviceWhiteBalanceGains`,
+   clamps to maxWhiteBalanceGain, locks via setWhiteBalanceModeLocked, converts back
+   with `device.temperatureAndTintValues(for:)` and returns them.
+3. CameraViewModel: `func lockGrayCardWB()` calling the above, updating kelvin/tint
+   published values (so sliders reflect reality) and persisting.
+4. ExposurePanel: "Gray card" button beside the WB presets invoking it (with a short
+   footnote-style caption "Fill frame with a neutral card, then tap").
+5. Touch only FocusPanel.swift, ExposurePanel.swift, CameraService.swift,
+   CameraViewModel.swift.
 
 **Status:** planned → implementing

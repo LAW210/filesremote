@@ -13,7 +13,7 @@ final class StackingService {
     }
 
     /// Runs the best available engine over the set's frames, writes the merged image
-    /// beside them, records it in the manifest, and returns the updated set + image.
+    /// beside them, records it in the manifest, and returns the updated set + StackOutput.
     func stackAndPersist(_ set: StackSet,
                          progress: @escaping (Double) -> Void = { _ in }) async throws -> (set: StackSet, output: StackOutput) {
         let engine = StackEngineFactory.make()
