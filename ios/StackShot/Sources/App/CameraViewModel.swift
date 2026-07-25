@@ -29,10 +29,10 @@ final class CameraViewModel: ObservableObject {
     @Published var selectedLensID: String?
 
     // Exposure (EV = ISO + shutter) and color (Kelvin WB) — independent controls.
-    @Published var iso: Float = 100
-    @Published var shutterDenominator: Double = 60      // 1/60 s
-    @Published var kelvin: Float = 5000
-    @Published var tint: Float = 0
+    @Published var iso: Float
+    @Published var shutterDenominator: Double      // e.g. 60 == 1/60 s
+    @Published var kelvin: Float
+    @Published var tint: Float
     @Published var exposureLocked = false
 
     // Focus
@@ -41,11 +41,23 @@ final class CameraViewModel: ObservableObject {
     @Published var farAnchor: Float?
 
     // Bracket
-    @Published var stepCount = AppConfig.Bracket.defaultStepCount
+    @Published var stepCount: Int { didSet { persistDefaultsIfLoaded() } }
     @Published var phase: Phase = .idle
     @Published var resultImage: UIImage?
     @Published var depthMapImage: UIImage?
     @Published var lastSet: StackSet?
+
+    // Focus peaking overlay in the live viewfinder.
+    @Published var peakingEnabled: Bool {
+        didSet {
+            preview.update { $0.peakingEnabled = peakingEnabled }
+            persistDefaultsIfLoaded()
+        }
+    }
+
+    /// Guards against `didSet` observers persisting the just-loaded values back to
+    /// `UserDefaults` during `init`.
+    private var isLoaded = false
 
     var shutterSeconds: Double { 1.0 / shutterDenominator }
     var canCapture: Bool {
@@ -53,6 +65,17 @@ final class CameraViewModel: ObservableObject {
     }
 
     // MARK: - Lifecycle
+
+    init() {
+        let defaults = CaptureDefaults.load()
+        _iso = Published(initialValue: defaults.iso)
+        _shutterDenominator = Published(initialValue: defaults.shutterDenominator)
+        _kelvin = Published(initialValue: defaults.kelvin)
+        _tint = Published(initialValue: defaults.tint)
+        _stepCount = Published(initialValue: defaults.stepCount)
+        _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
+        isLoaded = true
+    }
 
     func start() async {
         do {
@@ -67,6 +90,7 @@ final class CameraViewModel: ObservableObject {
                     self.histogram = output.histogram
                 }
             }
+            preview.update { $0.peakingEnabled = peakingEnabled }
             camera.start()
         } catch {
             report(error)
@@ -95,12 +119,31 @@ final class CameraViewModel: ObservableObject {
             try camera.setExposure(iso: iso, shutterSeconds: shutterSeconds)
             try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
             exposureLocked = true
+            persistDefaults()
         } catch {
             report(error)
         }
     }
 
     func unlockExposure() { exposureLocked = false }
+
+    // MARK: - Persistence
+
+    private func persistDefaults() {
+        CaptureDefaults(
+            iso: iso,
+            shutterDenominator: shutterDenominator,
+            kelvin: kelvin,
+            tint: tint,
+            stepCount: stepCount,
+            peakingEnabled: peakingEnabled
+        ).save()
+    }
+
+    private func persistDefaultsIfLoaded() {
+        guard isLoaded else { return }
+        persistDefaults()
+    }
 
     // MARK: - Focus + loupe
 
