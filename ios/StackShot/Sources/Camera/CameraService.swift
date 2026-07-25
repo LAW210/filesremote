@@ -184,6 +184,14 @@ final class CameraService: NSObject {
     /// through the same `onPreviewFrame` closure the real capture delegate uses, so the
     /// rest of the pipeline (peaking, zebra, histogram, loupe) can't tell the difference.
     private func startPreviewTimer() {
+        // start() is called both at launch and on every return to .active, and a
+        // .active → .inactive → .active trip (Control Center, App Switcher) never
+        // passes through .background, so stop() — the only thing that cancels this —
+        // may not have run. Without this guard each such trip would leave another
+        // timer running, compounding the frame rate. The real-hardware path is
+        // already idempotent via `if !session.isRunning`.
+        guard previewTimer == nil else { return }
+
         let timer = DispatchSource.makeTimerSource(queue: videoQueue)
         timer.schedule(deadline: .now(), repeating: 1.0 / 15.0)
         timer.setEventHandler { [weak self] in

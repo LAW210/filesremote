@@ -140,7 +140,9 @@ struct ViewfinderScreen: View {
                 } label: {
                     // Names the panel a tap would switch TO, not the one showing now.
                     VStack(spacing: 2) {
-                        Image(systemName: showExposurePanel ? "camera.metering.center.weighted" : "plusminus.circle")
+                        // Icon must point at the same panel as the label beneath it:
+                        // a viewfinder for Focus, plus/minus for EV compensation.
+                        Image(systemName: showExposurePanel ? "viewfinder" : "plusminus.circle")
                             .font(.title3)
                         Text(showExposurePanel ? "Focus" : "Exposure")
                             .font(.caption2)
