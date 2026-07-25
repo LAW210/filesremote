@@ -22,6 +22,10 @@ final class CameraViewModel: ObservableObject {
     @Published var viewfinderImage: UIImage?
     @Published var loupeImage: UIImage?
     @Published var loupeVisible = false
+    /// Normalized (0–1, top-left origin) sample point the loupe is magnifying — mirrors
+    /// `PreviewFrameProcessor.Settings.loupeCenter`, which the UI can't read directly,
+    /// so the viewfinder can draw a reticle at the point actually being inspected.
+    @Published private(set) var loupeCenter = CGPoint(x: 0.5, y: 0.5)
     @Published var histogram: [Float] = []
     @Published var errorMessage: String?
 
@@ -255,10 +259,12 @@ final class CameraViewModel: ObservableObject {
 
     func setLoupe(visible: Bool) {
         loupeVisible = visible
-        preview.update { $0.loupeCenter = visible ? CGPoint(x: 0.5, y: 0.5) : nil }
+        loupeCenter = CGPoint(x: 0.5, y: 0.5)
+        preview.update { $0.loupeCenter = visible ? loupeCenter : nil }
     }
 
     func moveLoupe(to normalizedPoint: CGPoint) {
+        loupeCenter = normalizedPoint
         preview.update { $0.loupeCenter = normalizedPoint }
     }
 

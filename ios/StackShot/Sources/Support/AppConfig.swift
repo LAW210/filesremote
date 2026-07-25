@@ -14,7 +14,10 @@ enum AppConfig {
     enum Loupe {
         static let defaultMagnification: CGFloat = 3
         static let magnificationRange: ClosedRange<CGFloat> = 2...6
-        static let diameter: CGFloat = 240
+        /// Kept a modest fraction of screen width (roughly a third on a 390pt phone) —
+        /// large enough to judge focus, small enough that it doesn't dominate the frame
+        /// or bury the very region it's meant to be inspecting.
+        static let diameter: CGFloat = 170
     }
 
     enum Exposure {

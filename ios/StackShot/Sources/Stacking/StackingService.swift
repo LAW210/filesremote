@@ -26,9 +26,16 @@ final class StackingService {
                          outputFormat: AppConfig.Stacking.OutputFormat = .jpeg,
                          deleteFramesAfter: Bool = false,
                          progress: @escaping (Double) -> Void = { _ in }) async throws -> (set: StackSet, output: StackOutput) {
+        // Appends to the same capture-log.txt the bracket wrote, so one file carries
+        // the whole story from shutter to stacked file — useful for the owner to send
+        // verbatim when a stack comes out soft or banded.
+        let log = CaptureLog(directory: store.directory(for: set))
+        let stackStart = Date()
+
         let engine = StackEngineFactory.make()
         let urls = set.frames.map { store.frameURL(set, $0) }
         let output = try await engine.stack(frameURLs: urls, progress: progress)
+        let stackDuration = Date().timeIntervalSince(stackStart)
 
         // Encoding failure must surface: silently returning a resultless set would
         // look like success to the caller while nothing reached disk.
@@ -73,6 +80,13 @@ final class StackingService {
                 try? FileManager.default.removeItem(at: store.frameURL(updated, frame))
             }
         }
+
+        log.line(String(
+            format: "stack: engine=%@ duration=%.3fs format=%@ bytes=%d depthMap=%@ framesDeleted=%@",
+            engine.name, stackDuration, outputFormat.rawValue.uppercased(), data.count,
+            depthMapFileName != nil ? "yes" : "no", deleteFramesAfter ? "yes" : "no"))
+        log.flush()
+
         return (updated, output)
     }
 

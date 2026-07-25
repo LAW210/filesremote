@@ -59,7 +59,18 @@ final class CameraService: NSObject {
             }
             return Lens(id: device.uniqueID, name: name, device: device)
         }
-        guard let initial = lenses.first(where: { $0.name == "1x" }) ?? lenses.first else {
+        // Default to whichever back camera focuses closest. StackShot is for macro
+        // work on small objects, and the lens with the shortest minimum focus
+        // distance — usually the ultra-wide on modern iPhones — is the one that can
+        // actually get close, which is also what Apple's own macro mode switches to.
+        // minimumFocusDistance is in millimetres and reports -1 when unknown, so
+        // only positive values are usable; if none report one, fall back to "1x".
+        let closestFocusing = lenses
+            .filter { $0.device.minimumFocusDistance > 0 }
+            .min { $0.device.minimumFocusDistance < $1.device.minimumFocusDistance }
+        guard let initial = closestFocusing
+            ?? lenses.first(where: { $0.name == "1x" })
+            ?? lenses.first else {
             throw CameraError.noCamera
         }
         try attach(lens: initial)
@@ -262,19 +273,23 @@ final class CameraService: NSObject {
     }
 
     /// Waits until the lens has physically settled near the requested position.
-    func waitForFocusSettle(target: Float, tolerance: Float = 0.005, timeout: TimeInterval = 1.5) async {
-        guard let device else { return }
+    /// Returns whether it actually settled, so callers can distinguish a clean
+    /// settle from a timeout for capture diagnostics.
+    @discardableResult
+    func waitForFocusSettle(target: Float, tolerance: Float = 0.005, timeout: TimeInterval = 1.5) async -> Bool {
+        guard let device else { return false }
         let deadline = Date().addingTimeInterval(timeout)
         var stableTicks = 0
         while Date() < deadline {
             if abs(device.lensPosition - target) <= tolerance {
                 stableTicks += 1
-                if stableTicks >= 3 { return }   // ~90 ms of stability
+                if stableTicks >= 3 { return true }   // ~90 ms of stability
             } else {
                 stableTicks = 0
             }
             try? await Task.sleep(nanoseconds: 30_000_000)
         }
+        return false
     }
 
     // MARK: - Capture

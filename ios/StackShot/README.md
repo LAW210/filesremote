@@ -85,17 +85,23 @@ every push via `.github/workflows/ios-tests.yml`.
 
 ## Embedding the real engine (focus-stack + OpenCV)
 
-The fallback stacker is deliberately simple. For production quality run:
+The fallback stacker is deliberately simple and does no frame alignment. For production
+quality — including alignment for focus breathing during a macro stack — run:
 
 ```bash
 ./scripts/fetch_engine.sh
 ```
 
-That vendors the MIT `focus-stack` sources plus OpenCV's iOS `opencv2.framework`. The
-`project-engine.yml` spec wires both into a build with `ENGINE_EMBEDDED` enabled, and CI's
-`build-engine` job compiles exactly that on every push — so the ObjC++ bridge and the C++
-core are known to build for iOS. To run it on device, mirror those settings into
-`project.yml` (the `ENGINE_EMBEDDED` flags are commented out there) and regenerate.
+That's the whole flow. The script vendors the MIT `focus-stack` sources plus OpenCV's iOS
+`opencv2.framework`, then (if `xcodegen` is on `PATH`) generates `StackShotEngine.xcodeproj`
+from `project-engine.yml`, which wires both into a build with `ENGINE_EMBEDDED` enabled.
+Open `StackShotEngine.xcodeproj` to build and run on device with the real C++ engine. CI's
+`build-engine` job builds this exact project on every push, so the ObjC++ bridge and the
+C++ core are known to build for iOS.
+
+`StackShot.xcodeproj` (generated from `project.yml`, per "Running tests" above) is the
+separate, plain project used for the unit tests and the pure-Swift fallback engine — it is
+untouched by `fetch_engine.sh` and has no C++ engine compiled in.
 
 ## Licenses shipped
 
@@ -106,6 +112,8 @@ core are known to build for iOS. To run it on device, mirror those settings into
 
 - The fallback stacker is CPU-bound (~seconds per stack at 2048 px) and does no alignment;
   the embedded C++ engine replaces it for production quality and speed.
-- The C++ engine is not yet vendored by default — see "Embedding the real engine" above.
+- The C++ engine is not vendored or built by default — it requires running
+  `scripts/fetch_engine.sh`, which produces a separate `StackShotEngine.xcodeproj`; see
+  "Embedding the real engine" above.
 - Loupe LiDAR distance readout is not implemented.
 - Diopter (macro) spacing is deferred.

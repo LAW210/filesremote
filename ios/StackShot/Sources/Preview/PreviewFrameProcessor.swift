@@ -79,8 +79,12 @@ final class PreviewFrameProcessor {
 
         var loupe: UIImage?
         if let center = snapshot.loupeCenter {
-            // Loupe samples from the full-resolution peaked image, not displaySource,
-            // so critical focus judgments aren't degraded by the viewfinder downscale.
+            // Loupe samples from the full-resolution *preview* buffer (roughly 1080p),
+            // not displaySource, so critical focus judgments aren't degraded by the
+            // viewfinder downscale. This is still the video preview stream, not the
+            // 12 MP still the camera will actually capture, so it cannot show true
+            // capture-resolution sharpness — only a closer look than the on-screen
+            // preview allows.
             loupe = renderLoupe(from: composited, center: center,
                                 magnification: snapshot.loupeMagnification,
                                 screenPointWidth: snapshot.screenPointWidth)

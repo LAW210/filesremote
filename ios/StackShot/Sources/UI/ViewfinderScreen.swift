@@ -28,6 +28,11 @@ struct ViewfinderScreen: View {
                         SquareCropGuide(viewSize: geo.size, imageSize: image.size)
                             .allowsHitTesting(false)
                     }
+                    if vm.loupeVisible {
+                        LoupeReticle(normalizedPoint: vm.loupeCenter,
+                                    viewSize: geo.size, imageSize: image.size)
+                            .allowsHitTesting(false)
+                    }
                 }
             } else {
                 ProgressView().tint(.white)
@@ -180,6 +185,37 @@ struct SquareCropGuide: View {
     }
 }
 
+/// Marks the point the loupe is currently magnifying, so there's some indication on
+/// the preview itself of what region is being shown after a tap moves the sample point.
+struct LoupeReticle: View {
+    let normalizedPoint: CGPoint
+    let viewSize: CGSize
+    let imageSize: CGSize
+
+    private let size: CGFloat = 28
+
+    var body: some View {
+        let fitted = CGRect.aspectFit(imageSize, in: viewSize)
+        let center = CGPoint(x: fitted.minX + normalizedPoint.x * fitted.width,
+                             y: fitted.minY + normalizedPoint.y * fitted.height)
+
+        ZStack {
+            Circle()
+                .stroke(.yellow, lineWidth: 1.5)
+                .frame(width: size, height: size)
+            Path { path in
+                path.move(to: CGPoint(x: 0, y: size / 2))
+                path.addLine(to: CGPoint(x: size, y: size / 2))
+                path.move(to: CGPoint(x: size / 2, y: 0))
+                path.addLine(to: CGPoint(x: size / 2, y: size))
+            }
+            .stroke(.yellow, lineWidth: 1.5)
+            .frame(width: size, height: size)
+        }
+        .position(center)
+    }
+}
+
 struct CaptureButton: View {
     @EnvironmentObject var vm: CameraViewModel
 
@@ -203,9 +239,17 @@ struct LoupeView: View {
     @State private var magnification = AppConfig.Loupe.defaultMagnification
     @State private var gestureBase = AppConfig.Loupe.defaultMagnification
 
+    /// Sits on the side opposite the sample point, so it never covers the region it's
+    /// magnifying. The dodge is horizontal only: the bottom of the screen belongs to
+    /// the control panel, so dodging downward would trade one occlusion for a worse one.
+    private var dodgeAlignment: Alignment {
+        vm.loupeCenter.x >= 0.5 ? .topLeading : .topTrailing
+    }
+
     var body: some View {
         let side = AppConfig.Loupe.diameter
         let range = AppConfig.Loupe.magnificationRange
+        let alignment = dodgeAlignment
         VStack(spacing: 4) {
             Image(uiImage: image)
                 .resizable()
@@ -224,9 +268,10 @@ struct LoupeView: View {
                 }
                 .onEnded { _ in gestureBase = magnification }
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .padding(.top, 60)
-        .padding(.trailing, 12)
+        .padding(.leading, alignment == .topLeading ? 12 : 0)
+        .padding(.trailing, alignment == .topTrailing ? 12 : 0)
     }
 }
 

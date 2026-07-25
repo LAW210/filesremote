@@ -52,9 +52,15 @@ struct StackSet: Codable, Identifiable {
     var result: Result?
 
     /// One-line capture summary shared by the review sheet and the library detail.
+    /// Surfaces what the photographer chose (EV bias) rather than ISO/shutter, which
+    /// the camera metered internally and the owner doesn't want exposed in the UI.
     var captureSummary: String {
-        "\(frames.count) frames · ISO \(Int(exposure.iso)) · " +
-        "1/\(Int(1 / exposure.shutterSeconds)) s · \(Int(whiteBalance.kelvin))K"
+        var segments = ["\(frames.count) frames"]
+        if let bias = exposure.evBias {
+            segments.append(String(format: "EV %+.1f", bias))
+        }
+        segments.append("\(Int(whiteBalance.kelvin))K")
+        return segments.joined(separator: " · ")
     }
 }
 

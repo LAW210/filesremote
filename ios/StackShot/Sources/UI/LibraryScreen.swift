@@ -42,13 +42,25 @@ struct LibraryScreen: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(set.createdAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.subheadline)
-                Text("\(set.frames.count) frames · ISO \(Int(set.exposure.iso)) · " +
-                     "\(Int(set.whiteBalance.kelvin))K" +
-                     (set.result == nil ? " · not stacked" : ""))
+                Text(librarySummary(for: set))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Mirrors `StackSet.captureSummary` (frames · EV · Kelvin) but appends the
+    /// library-specific "not stacked" suffix. ISO/shutter are never shown here —
+    /// the owner wants only what the photographer chose, not what the camera metered.
+    private func librarySummary(for set: StackSet) -> String {
+        var segments = ["\(set.frames.count) frames"]
+        if let bias = set.exposure.evBias {
+            segments.append(String(format: "EV %+.1f", bias))
+        }
+        segments.append("\(Int(set.whiteBalance.kelvin))K")
+        var summary = segments.joined(separator: " · ")
+        if set.result == nil { summary += " · not stacked" }
+        return summary
     }
 
     private func thumbnailURL(for set: StackSet) -> URL? {
