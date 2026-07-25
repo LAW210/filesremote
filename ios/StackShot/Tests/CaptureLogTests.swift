@@ -116,8 +116,25 @@ final class CaptureLogTests: XCTestCase {
             atPath: missing.appendingPathComponent("capture-log.txt").path))
     }
 
-    func testFlushingWithNoLinesLeavesAnEmptyLogRatherThanFailing() throws {
+    /// A bracket that fails before logging anything must not leave a file behind: an
+    /// empty log would seed the next instance with a blank first line, and would make
+    /// `captureLogURL(for:)` report a log that has nothing in it.
+    func testFlushingWithNoLinesWritesNoFile() {
         CaptureLog(directory: directory).flush()
-        XCTAssertEqual(try readLines(), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: logURL.path))
+    }
+
+    /// The consequence that matters: an empty flush must not push the first real
+    /// entry down a line when a later stage opens its own log over the same folder.
+    func testAnEmptyFlushDoesNotDisplaceLaterEntries() throws {
+        CaptureLog(directory: directory).flush()
+
+        let later = CaptureLog(directory: directory)
+        later.line("stack: engine=native")
+        later.flush()
+
+        let lines = try readLines()
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines[0].hasSuffix("  stack: engine=native"))
     }
 }

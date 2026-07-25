@@ -41,6 +41,12 @@ final class CaptureLog {
     /// per-frame timing this log exists to measure. Silent on failure — a log write
     /// must never be the thing that throws.
     func flush() {
+        // Nothing buffered means nothing to say. Writing anyway would leave a file
+        // containing a lone newline, which the next instance over this folder would
+        // seed as one empty line — putting a blank line above the first real entry.
+        // It also keeps `captureLogURL(for:)` honest: no file means no log.
+        guard !lines.isEmpty else { return }
+
         let text = lines.joined(separator: "\n") + "\n"
         guard let data = text.data(using: .utf8) else { return }
         try? data.write(to: url)
