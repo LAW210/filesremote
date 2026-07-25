@@ -58,6 +58,8 @@ final class FocusBracketController {
             frames: [],
             result: nil)
         let dir = try store.createDirectory(for: set)
+        var completed = false
+        defer { if !completed { try? FileManager.default.removeItem(at: dir) } }
 
         // Tripod workflow: short start timer damps the button-press shake.
         if startTimerSeconds > 0 {
@@ -82,6 +84,7 @@ final class FocusBracketController {
         }
 
         try store.saveManifest(set)
+        completed = true
         progress(.done)
         return set
     }

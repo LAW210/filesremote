@@ -78,15 +78,22 @@ final class StackStore {
         try data.write(to: directory(for: set).appendingPathComponent("manifest.json"), options: .atomic)
     }
 
-    func loadAll() -> [StackSet] {
+    func loadAll() -> (sets: [StackSet], corruptCount: Int) {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let dirs = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        return dirs.compactMap { dir in
-            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")) else { return nil }
-            return try? decoder.decode(StackSet.self, from: data)
+        var sets: [StackSet] = []
+        var corruptCount = 0
+        for dir in dirs {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")) else { continue }
+            if let set = try? decoder.decode(StackSet.self, from: data) {
+                sets.append(set)
+            } else {
+                corruptCount += 1
+            }
         }
-        .sorted { $0.createdAt > $1.createdAt }
+        sets.sort { $0.createdAt > $1.createdAt }
+        return (sets, corruptCount)
     }
 
     func frameURL(_ set: StackSet, _ frame: StackSet.Frame) -> URL {

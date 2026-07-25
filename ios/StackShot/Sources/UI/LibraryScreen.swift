@@ -4,6 +4,7 @@ import SwiftUI
 /// Deliberately independent of CameraViewModel — it only touches the store.
 struct LibraryScreen: View {
     @State private var sets: [StackSet] = []
+    @State private var corruptCount: Int = 0
 
     var body: some View {
         List {
@@ -19,12 +20,21 @@ struct LibraryScreen: View {
                     row(for: set)
                 }
             }
+            if corruptCount > 0 {
+                Label("\(corruptCount) stack(s) could not be read", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
         .navigationTitle("Library")
         .toolbar {
             NavigationLink("Licenses") { AcknowledgementsScreen() }
         }
-        .onAppear { sets = StackStore.shared.loadAll() }
+        .onAppear {
+            let result = StackStore.shared.loadAll()
+            sets = result.sets
+            corruptCount = result.corruptCount
+        }
     }
 
     private func row(for set: StackSet) -> some View {

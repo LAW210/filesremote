@@ -17,9 +17,8 @@
 Logged by the iteration-3 maintenance sweep (complex; not fixed passively):
 1. NativeDepthMapStacker.swift:9 — no frame alignment before compositing; handheld
    captures will ghost (embedded C++ engine adds ECC; fallback documents the limit).
-2. FocusBracketController.swift:69 — a mid-bracket capture failure leaves orphaned
-   frame files/directory with no cleanup.
-3. StackSet.swift:81 (StackStore.loadAll) — corrupt manifests silently vanish (try?).
+2. ~~FocusBracketController orphaned frames on failure~~ — RESOLVED in iteration 5.
+3. ~~StackStore.loadAll silent corrupt manifests~~ — RESOLVED in iteration 5.
 4. CameraService.swift:210 — .restricted vs .denied camera permission collapsed into
    one generic error message.
 5. StackEngine.swift:70 — C++ engine depth map uses a fixed tmp path; concurrent
@@ -59,20 +58,23 @@ that gap); CameraService.lockNeutralWhiteBalance() (gray-world gains → clamp �
 Kelvin/tint readback); Gray card button + hint in ExposurePanel with sliders synced to
 the measured values. Verification: clean, 0 retries.
 
-## Iteration 5 — Cancel-safe cleanup + surfaced manifest errors (debt items 2 & 3)
+## Iteration 5 — Cancel-safe cleanup + surfaced manifest errors ✅
+Shipped: partial StackSet directories deleted on any bracket failure/cancel
+(completed-flag + defer); loadAll now reports corrupt-manifest count; Library shows an
+orange warning row when stacks can't be read. Debt items 2 & 3 resolved.
+Verification: clean, 0 retries.
+
+## Iteration 6 (final) — Permission errors, docs sync + maintenance sweep (6 % 3 == 0)
 
 **Plan (finalized):**
-1. FocusBracketController.run: wrap the capture loop so that on ANY throw (including
-   cancellation) the partially written StackSet directory is deleted before rethrow
-   (frames captured so far are useless without the full bracket). Use a success flag +
-   defer, or do/catch → removeItem → rethrow. Manifest is only written on full success
-   (already true — keep it that way).
-2. StackStore.loadAll: return manifests that decode, but count failures; change the
-   signature to `loadAll() -> (sets: [StackSet], corruptCount: Int)` OR keep the
-   signature and add `corruptManifestCount()` — choose the tuple; update the single
-   call site (LibraryScreen) to show a footnote row "N stack(s) could not be read"
-   when corruptCount > 0.
-3. Touch only FocusBracketController.swift, StackSet.swift (StackStore), and
-   LibraryScreen.swift.
+1. Debt item 4: CameraError gains `.permissionRestricted`; CameraService.configure
+   distinguishes .restricted (parental controls / MDM) from .denied with distinct
+   user-facing messages.
+2. Docs sync: ios/StackShot/README.md — document the features shipped by the loop
+   (depth-map toggle, persisted settings, peaking toggle, gray-card WB, corrupt-stack
+   warning, cancel cleanup, test target + how to run tests) and refresh the gaps list.
+3. Maintenance sweep #2 (passive): re-scan only files changed in iterations 4–5 for
+   unused imports/typos/doc drift; log complex issues as Technical Debt.
+4. Terminate loop; output final summary (shipped / technical debt / skipped).
 
 **Status:** planned → implementing
