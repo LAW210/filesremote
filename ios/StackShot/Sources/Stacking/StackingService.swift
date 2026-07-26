@@ -3,8 +3,7 @@ import Photos
 import UIKit
 import UniformTypeIdentifiers
 
-/// The single path from "captured StackSet" to "persisted merged result".
-/// Both the live capture flow and library re-stacking go through here, so the
+/// The single path from "captured StackSet" to "persisted merged result", so the
 /// manifest, file naming, and engine choice can never drift apart.
 final class StackingService {
     static let shared = StackingService()
@@ -174,7 +173,8 @@ final class StackingService {
     /// failed bracket or a set captured before logging existed has none, so callers
     /// must not assume the file is there just because the set is.
     func captureLogURL(for set: StackSet) -> URL? {
-        let url = store.directory(for: set).appendingPathComponent("capture-log.txt")
+        let url = store.directory(for: set)
+            .appendingPathComponent(AppConfig.Stacking.captureLogFileName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 

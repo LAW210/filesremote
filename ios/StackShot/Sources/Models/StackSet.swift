@@ -68,6 +68,11 @@ struct StackSet: Codable, Identifiable {
 final class StackStore {
     static let shared = StackStore()
 
+    /// One name, written by `saveManifest` and read by `loadAll`. Held as separate
+    /// literals, a rename would have emptied the Library silently — every stack still
+    /// on disk, none of them listed, and nothing to point at the cause.
+    private static let manifestFileName = "manifest.json"
+
     private let root: URL
 
     init(root: URL? = nil) {
@@ -91,7 +96,8 @@ final class StackStore {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(set)
-        try data.write(to: directory(for: set).appendingPathComponent("manifest.json"), options: .atomic)
+        try data.write(to: directory(for: set).appendingPathComponent(Self.manifestFileName),
+                       options: .atomic)
     }
 
     func loadAll() -> [StackSet] {
@@ -99,7 +105,7 @@ final class StackStore {
         decoder.dateDecodingStrategy = .iso8601
         let dirs = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
         return dirs
-            .compactMap { try? Data(contentsOf: $0.appendingPathComponent("manifest.json")) }
+            .compactMap { try? Data(contentsOf: $0.appendingPathComponent(Self.manifestFileName)) }
             .compactMap { try? decoder.decode(StackSet.self, from: $0) }
             .sorted { $0.createdAt > $1.createdAt }
     }

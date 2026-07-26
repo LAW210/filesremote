@@ -1,7 +1,7 @@
 import AVFoundation
 import UIKit
 
-/// Wraps AVCaptureSession: lens selection, manual focus/exposure/white balance, RAW capture,
+/// Wraps AVCaptureSession: lens selection, manual focus, EV bias, white balance, RAW capture,
 /// and a video data output that feeds the viewfinder, focus peaking, and the loupe.
 final class CameraService: NSObject, CameraControlling {
 

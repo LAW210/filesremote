@@ -40,6 +40,11 @@ enum AppConfig {
         static let fallbackMaxDimension: CGFloat = 2048
         /// Diagnostic artifact — PNG so the per-pixel frame indices stay exact.
         static let depthMapFileName = "depthmap.png"
+        /// Written by `CaptureLog` and read back by `StackingService.captureLogURL(for:)`.
+        /// Those lived as separate string literals in separate files: renaming one would
+        /// have made the Library's "Capture log" button quietly stop appearing, with no
+        /// error and no failing test.
+        static let captureLogFileName = "capture-log.txt"
 
         /// Format of the final stacked image. Both are formats listing sites accept
         /// (eBay takes JPEG/PNG/TIFF/BMP/GIF/WebP — notably not HEIC): JPEG for

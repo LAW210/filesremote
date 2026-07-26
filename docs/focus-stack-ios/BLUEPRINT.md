@@ -322,7 +322,8 @@ optionals so older manifests keep decoding.
 
 1. **Viewfinder** — live feed, peaking overlay, lens picker chips, exposure/focus toggles,
    big shutter button.
-2. **Exposure panel** — ISO + shutter sliders, histogram, EV meter; a **Kelvin + tint** white-balance
+2. **Exposure panel** — a single **EV** slider (positive-only) biasing the camera's own
+   metering, plus a histogram; a **Kelvin + tint** white-balance
    slider with presets and gray-card lock; a single "Lock" for both.
 3. **Focus panel** — focus slider + reticle readout, **3× focus loupe** for confirming sharpness,
    **Set Near** / **Set Far** buttons, a planned-steps strip showing the 8 focus planes.
@@ -384,12 +385,28 @@ optionals so older manifests keep decoding.
 ## 13. Testing
 
 **Implemented** (`ios/StackShot/Tests/`, run on every push by
-`.github/workflows/ios-tests.yml`):
-- Bracket plan spacing: inclusive endpoints, even spacing, N=1/2/8, reversed range.
-- `CaptureDefaults`: unset defaults, save/load round-trip, range clamping, shutter and
-  output-format whitelist fallbacks.
-- `StackSet` Codable: round-trip with and without a depth map, plus a legacy-manifest
-  fixture to prove forward compatibility.
+`.github/workflows/ios-tests.yml`). Coverage is confined to what is decidable without a
+camera, which is the only kind of verification available before the first device session —
+see §14.3a for why the seam that makes most of this reachable exists at all:
+
+- **Camera control state** — every view-model change that must reach the device: white
+  balance on change, the gray-card measurement not being overwritten by the sliders
+  reflecting it, EV, focus, the settle → lock → white-balance order asserted as a
+  sequence rather than an end state, lens cycling under rapid taps, torch failure
+  directions, and what `start()` pushes.
+- **Session lifecycle** — backgrounding, the launch race, re-applying locks on resume,
+  and that a resume is skipped while a bracket owns the device.
+- **Focus bracket** — the capture spine end to end against real files: planned positions
+  in order, one-retry-per-frame, cancellation, cleanup-on-failure (asserting frames
+  existed before checking they were removed), and the capture log's contents including
+  the settle and actual-position columns.
+- **Stacking pipeline** — that the stacker actually stacks: synthetic frames whose sharp
+  region is known in advance, asserting the depth map attributes each region to the right
+  source frame; the manifest-before-delete ordering, exercised by inducing a real write
+  failure; and a full capture → stack → persist run with no hardware anywhere in it.
+- **Pure logic** — bracket plan spacing, `CaptureDefaults` round-trip and clamping,
+  `StackSet` Codable including a legacy manifest, `CaptureReadiness`, `CaptureLog`'s
+  cross-instance append, aspect-fit geometry, and the capture summary.
 
 **CI also runs:** SwiftLint, an app build + test on a simulator, and a separate
 `build-engine` job that vendors focus-stack + OpenCV and compile-checks the

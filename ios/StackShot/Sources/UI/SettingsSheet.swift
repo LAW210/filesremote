@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Output settings: stacked-image format and whether RAW source frames are kept.
+/// Output settings: stacked-image format, auto-save, and the crop guide. Source RAW
+/// frames are always deleted once the stack is safe — that is stated here, not chosen.
 struct SettingsSheet: View {
     @EnvironmentObject var vm: CameraViewModel
     @Environment(\.dismiss) private var dismiss

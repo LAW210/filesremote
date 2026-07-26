@@ -20,7 +20,7 @@ final class CaptureLog {
     /// keeps the writer dead simple (no append-mode file handle to manage) while
     /// still behaving like an append across separate CaptureLog instances.
     init(directory: URL) {
-        self.url = directory.appendingPathComponent("capture-log.txt")
+        self.url = directory.appendingPathComponent(AppConfig.Stacking.captureLogFileName)
         self.start = Date()
         if let existing = try? String(contentsOf: url, encoding: .utf8) {
             lines = existing.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
