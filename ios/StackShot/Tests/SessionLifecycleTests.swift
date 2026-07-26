@@ -170,8 +170,12 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertFalse(vm.isPreviewMode)
 
         vm.handleScenePhase(.active)
-        await settle { fake.calls.contains(.configure) }
+        // Wait on the last call in the sequence, not the first: `start()` suspends
+        // between configure and start, so settling on configure can return before the
+        // session is actually up.
+        await settle { fake.calls.contains(.start) }
 
+        XCTAssertTrue(fake.calls.contains(.configure))
         XCTAssertTrue(fake.calls.contains(.start))
         XCTAssertNil(vm.errorMessage)
     }
