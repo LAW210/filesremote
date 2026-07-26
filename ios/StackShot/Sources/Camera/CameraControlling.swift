@@ -8,7 +8,7 @@ import Foundation
 /// the identity back and resolves it to the real device internally.
 struct LensInfo: Identifiable, Equatable {
     let id: String
-    let name: String            // "0.5x", "1x", "Tele"
+    let name: String            // magnification, e.g. "0.5\u{00D7}", "1\u{00D7}"
 }
 
 /// Everything the view model and the bracket controller need from the camera. The only

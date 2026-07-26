@@ -8,7 +8,7 @@ final class CameraService: NSObject, CameraControlling {
     /// A lens plus the device behind it. Stays inside this file: callers see `LensInfo`.
     private struct DeviceLens {
         let id: String
-        let name: String            // "0.5x", "1x", "3x"
+        let name: String            // magnification, e.g. "0.5\u{00D7}", "1\u{00D7}"
         let device: AVCaptureDevice
 
         var info: LensInfo { LensInfo(id: id, name: name) }
@@ -108,12 +108,14 @@ final class CameraService: NSObject, CameraControlling {
             return
         }
 
+        // Labels are magnifications relative to the wide camera, so the button reads as
+        // one scale rather than mixing a zoom factor with a lens type.
         deviceLenses = discovery.devices.map { device in
             let name: String
             switch device.deviceType {
-            case .builtInUltraWideCamera: name = "0.5x"
-            case .builtInTelephotoCamera: name = "Tele"
-            default: name = "1x"
+            case .builtInUltraWideCamera: name = "0.5\u{00D7}"
+            case .builtInTelephotoCamera: name = "2\u{00D7}"
+            default: name = "1\u{00D7}"
             }
             return DeviceLens(id: device.uniqueID, name: name, device: device)
         }
@@ -122,12 +124,15 @@ final class CameraService: NSObject, CameraControlling {
         // distance — usually the ultra-wide on modern iPhones — is the one that can
         // actually get close, which is also what Apple's own macro mode switches to.
         // minimumFocusDistance is in millimetres and reports -1 when unknown, so
-        // only positive values are usable; if none report one, fall back to "1x".
+        // only positive values are usable; if none report one, fall back to the wide
+        // camera. That fallback matches on device type, not on the label: the label is
+        // display text and matching it here would mean renaming a button silently
+        // changed which lens the app opens on.
         let closestFocusing = deviceLenses
             .filter { $0.device.minimumFocusDistance > 0 }
             .min { $0.device.minimumFocusDistance < $1.device.minimumFocusDistance }
         guard let initial = closestFocusing
-            ?? deviceLenses.first(where: { $0.name == "1x" })
+            ?? deviceLenses.first(where: { $0.device.deviceType == .builtInWideAngleCamera })
             ?? deviceLenses.first else {
             throw CameraError.noCamera
         }
