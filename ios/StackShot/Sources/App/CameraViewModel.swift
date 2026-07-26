@@ -127,6 +127,9 @@ final class CameraViewModel: ObservableObject {
     /// can't configure the session twice at once.
     private var isStarting = false
 
+    /// The most recent lens switch, so the next one can wait for it. See `selectLens`.
+    private var lensSwitchTask: Task<Void, Never>?
+
     /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
     /// observers don't immediately push the rounded values back over it. See
     /// `lockGrayCardWB()`.
@@ -237,7 +240,18 @@ final class CameraViewModel: ObservableObject {
         // one step instead of two. Restored below if the switch fails.
         let previousLensID = selectedLensID
         selectedLensID = id
-        Task {
+
+        // Switches are chained rather than fired independently. `camera.select` is
+        // nonisolated async, so two taps hop off the main actor and can reach the device
+        // in either order — which left the hardware on one lens while `selectedLensID`
+        // named another, permanently, until the next tap. Awaiting the previous switch
+        // makes the last tap the one that wins, which is what the button appears to
+        // promise. It costs one extra session reconfiguration on a double-tap; skipping
+        // the intermediate lens would be nicer still, but `select` isn't cancellable
+        // once it has begun and a half-applied switch is worse than a wasted one.
+        let previousSwitch = lensSwitchTask
+        lensSwitchTask = Task {
+            await previousSwitch?.value
             do {
                 try await camera.select(lens: lens)
             } catch {
