@@ -623,7 +623,19 @@ final class CameraViewModel: ObservableObject {
             if exposureLocked {
                 // Re-freeze: iOS may have handed the camera to another app and reset
                 // the device while we were suspended.
-                try await freezeExposureAndWhiteBalance()
+                //
+                // If this throws, the flag must come down with it. Leaving it true put
+                // the lock chip on green over a camera that was actually still metering
+                // — and the shutter, which only asks for a lock when the flag is false,
+                // would have let a bracket run and banded the stack. Better to make the
+                // owner re-lock than to lie about the one precondition that matters.
+                do {
+                    try await freezeExposureAndWhiteBalance()
+                } catch {
+                    exposureLocked = false
+                    lockedExposure = nil
+                    throw error
+                }
             } else {
                 // Colour is a manual setting either way, so it has to be restored even
                 // when exposure is live — otherwise a background trip silently reverts

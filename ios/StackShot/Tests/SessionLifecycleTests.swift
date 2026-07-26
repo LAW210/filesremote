@@ -423,6 +423,25 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
     }
 
+    /// A failed re-lock has to clear the flag, not just report.
+    ///
+    /// The lock chip reads straight off `exposureLocked`, and the shutter only asks for a
+    /// lock when it is false. Leaving it true after a failed re-freeze showed green over a
+    /// camera that was still metering, and let a bracket run that would band.
+    func testFailedReLockOnResumeClearsTheExposureLock() async {
+        let (vm, fake) = makeConfiguredViewModel()
+        vm.exposureLocked = true
+        fake.fail("lockExposure", with: CameraError.configurationFailed)
+        vm.handleScenePhase(.background)
+        fake.reset()
+
+        vm.handleScenePhase(.active)
+        await settle("the failed re-lock to be reported") { vm.errorMessage != nil }
+
+        XCTAssertFalse(vm.exposureLocked, "the chip must not claim a lock the device lost")
+        XCTAssertNotNil(vm.captureBlockedReason, "and the shutter must ask for it again")
+    }
+
     // MARK: - A resume owed while busy
 
     /// Backgrounding while the review sheet is up, then returning, then dismissing.
