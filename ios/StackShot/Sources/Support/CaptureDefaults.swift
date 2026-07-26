@@ -14,7 +14,7 @@ struct CaptureDefaults {
     var autoSaveToPhotos: Bool
     var squareGuideEnabled: Bool
 
-    private enum Key {
+    enum Key {
         static let evBias = "capture.evBias"
         static let kelvin = "capture.kelvin"
         static let tint = "capture.tint"
@@ -25,6 +25,14 @@ struct CaptureDefaults {
         static let autoSaveToPhotos = "capture.autoSaveToPhotos"
         static let squareGuideEnabled = "capture.squareGuideEnabled"
     }
+
+    /// Every key this type owns. Tests isolate exactly this surface, and having one list
+    /// means a tenth setting added above is covered automatically rather than quietly
+    /// leaking into whatever `UserDefaults` the tests happen to run against.
+    static let allKeys = [
+        Key.evBias, Key.kelvin, Key.tint, Key.stepCount, Key.peakingEnabled,
+        Key.zebraEnabled, Key.outputFormat, Key.autoSaveToPhotos, Key.squareGuideEnabled,
+    ]
 
     /// Loads persisted values, clamping to `AppConfig` ranges and falling back to
     /// sensible defaults when unset (`UserDefaults`'s numeric accessors return 0 for

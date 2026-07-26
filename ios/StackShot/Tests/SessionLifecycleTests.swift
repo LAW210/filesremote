@@ -2,21 +2,6 @@ import SwiftUI
 import XCTest
 @testable import StackShot
 
-/// The `capture.*` keys `CaptureDefaults` owns. Duplicated here because they are
-/// `private` to `CaptureDefaults`, and kept outside the `@MainActor` test class so the
-/// teardown block can read them from a non-isolated context.
-private let captureDefaultsKeys = [
-    "capture.evBias",
-    "capture.kelvin",
-    "capture.tint",
-    "capture.stepCount",
-    "capture.peakingEnabled",
-    "capture.zebraEnabled",
-    "capture.outputFormat",
-    "capture.autoSaveToPhotos",
-    "capture.squareGuideEnabled"
-]
-
 /// App-lifecycle behaviour: `CameraViewModel.handleScenePhase(_:)` and the
 /// `resumeSession()` it schedules. Backgrounding and resuming is where the state the UI
 /// claims to own (torch, exposure lock, white balance, focus) can silently diverge from
@@ -32,37 +17,12 @@ final class SessionLifecycleTests: XCTestCase {
 
     private static let backLens = LensInfo(id: "back.1x", name: "1x")
 
-    /// `CameraViewModel` loads in `init` and saves on nearly every published change
-    /// through `CaptureDefaults`, whose `defaults:` parameter the view model never
-    /// passes — so it always reads and writes `UserDefaults.standard`. There is no
-    /// injection seam to use instead, so each test snapshots those keys, clears them
-    /// (giving the documented defaults: EV 0, 5000 K, tint 0, focus 0.5) and restores
-    /// whatever was there on teardown. Nothing outside the `capture.` prefix is touched.
-    private func isolateCaptureDefaults() {
-        let keys = captureDefaultsKeys
-        let defaults = UserDefaults.standard
-        var saved: [String: Any] = [:]
-        for key in keys {
-            if let value = defaults.object(forKey: key) { saved[key] = value }
-            defaults.removeObject(forKey: key)
-        }
-        addTeardownBlock {
-            for key in keys {
-                if let value = saved[key] {
-                    defaults.set(value, forKey: key)
-                } else {
-                    defaults.removeObject(forKey: key)
-                }
-            }
-        }
-    }
-
     /// A view model whose camera is already "configured" as far as
     /// `handleScenePhase(.active)` is concerned — i.e. it has lenses. Set up by
     /// assignment rather than by `start()` so these tests never depend on `UIScreen`,
     /// which `start()` reads via `syncPreviewSettings()`.
     private func makeConfiguredViewModel() -> (CameraViewModel, FakeCamera) {
-        isolateCaptureDefaults()
+        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.lenses = [Self.backLens]
         fake.currentLens = Self.backLens
@@ -72,17 +32,35 @@ final class SessionLifecycleTests: XCTestCase {
         return (vm, fake)
     }
 
-    /// Lets the main actor drain: `handleScenePhase(.active)` hands off to a `Task`, so
-    /// nothing `resumeSession()` does is visible on the line after the call. Returns as
-    /// soon as `condition` holds, so a passing test costs a handful of cooperative
-    /// yields rather than a fixed sleep. `turns` only bounds how long a never-satisfied
-    /// condition spins, so a real regression fails on the assertion that follows
-    /// instead of hanging the suite.
-    private func settle(turns: Int = 200, until condition: () -> Bool = { false }) async {
-        for _ in 0..<turns {
-            if condition() { return }
-            await Task.yield()
+    /// Waits for `condition`, failing the test if it never holds.
+    ///
+    /// The failure matters. An earlier version silently gave up after N yields, which is
+    /// fine ahead of a positive assertion — the assertion fails instead — but turns every
+    /// *negative* one ("no error was reported", "lockExposure was not called") into a
+    /// free pass, because not-yet-happened and never-happens look identical. Some of the
+    /// work also runs off the main actor, so cooperative yields alone do not guarantee it
+    /// was even scheduled.
+    private func settle(_ description: String = "the expected calls",
+                        timeout: TimeInterval = 5,
+                        file: StaticString = #filePath,
+                        line: UInt = #line,
+                        until condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for \(description)", file: file, line: line)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
+    }
+
+    /// Yields the main actor a bounded number of times without asserting anything, for
+    /// the cases that are checking something did NOT happen and so have no condition to
+    /// wait on. Deliberately separate from `settle` so a missing condition can't quietly
+    /// become a passing negative test.
+    private func drain(turns: Int = 200) async {
+        for _ in 0..<turns { await Task.yield() }
     }
 
     /// Pattern-matches rather than comparing, so this doesn't rely on `CameraError`
@@ -163,17 +141,18 @@ final class SessionLifecycleTests: XCTestCase {
     /// forever, because `.task` never runs a second time. `start()` is reentrancy-guarded,
     /// so the launch case is safe — see the test below.
     func testActiveWithNothingConfiguredAttemptsStart() async {
-        isolateCaptureDefaults()
+        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         let vm = CameraViewModel(camera: fake)
         XCTAssertTrue(vm.lenses.isEmpty)
         XCTAssertFalse(vm.isPreviewMode)
 
         vm.handleScenePhase(.active)
-        // Wait on the last call in the sequence, not the first: `start()` suspends
-        // between configure and start, so settling on configure can return before the
-        // session is actually up.
-        await settle { fake.calls.contains(.start) }
+        // Wait on the genuinely last call, not the first or the middle. `start()` pushes
+        // EV, white balance and focus *after* `camera.start()`, and each of those can
+        // report an error — so settling on `.start` and then asserting `errorMessage` is
+        // nil would pass while those pushes were still pending.
+        await settle("start() to finish") { fake.calls.contains(.setFocus(lensPosition: vm.lensPosition)) }
 
         XCTAssertTrue(fake.calls.contains(.configure))
         XCTAssertTrue(fake.calls.contains(.start))
@@ -184,7 +163,7 @@ final class SessionLifecycleTests: XCTestCase {
     /// the first `.active` also lands. Exactly one configuration must happen — a second
     /// concurrent `start()` is a no-op, not a parallel reconfiguration of a live session.
     func testConcurrentStartsConfigureOnlyOnce() async {
-        isolateCaptureDefaults()
+        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         let vm = CameraViewModel(camera: fake)
 
@@ -205,7 +184,7 @@ final class SessionLifecycleTests: XCTestCase {
     /// `start()`, so this goes through the real `start()` path with a preview-mode
     /// camera rather than setting the flag directly.
     func testActiveInPreviewModeResumesEvenWithNoLenses() async {
-        isolateCaptureDefaults()
+        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.isPreviewMode = true                 // and therefore no lenses
         let vm = CameraViewModel(camera: fake)
@@ -216,7 +195,10 @@ final class SessionLifecycleTests: XCTestCase {
         fake.reset()
 
         vm.handleScenePhase(.active)
-        await settle { fake.calls.contains(.start) }
+        // `.start` is the *first* thing `resumeSession()` does; waiting on it and then
+        // asserting no error would leave the three device pushes that follow still in
+        // flight.
+        await settle("the resume to finish") { fake.calls.contains(.setFocus(lensPosition: vm.lensPosition)) }
 
         XCTAssertTrue(fake.calls.contains(.start), "preview mode must restart its frame timer")
         XCTAssertNil(vm.errorMessage)
@@ -355,7 +337,7 @@ final class SessionLifecycleTests: XCTestCase {
         vm.exposureLocked = true
 
         vm.handleScenePhase(.inactive)
-        await settle()
+        await drain()
 
         XCTAssertEqual(fake.calls, [])
         XCTAssertTrue(vm.exposureLocked)
@@ -424,7 +406,7 @@ final class SessionLifecycleTests: XCTestCase {
     /// `FakeCamera` because `CameraService`'s preview mode is not reachable from a test
     /// bundle (see the note above).
     func testGrayCardLockWithAPreviewModeNeutralReadingRaisesNoError() {
-        isolateCaptureDefaults()
+        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.isPreviewMode = true
         fake.neutralWhiteBalanceResult = (5000, 0)   // CameraService's preview-mode value
@@ -439,5 +421,59 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertTrue(AppConfig.Exposure.tintRange.contains(vm.tint))
         // Reflecting the measurement back into the sliders must not push it out again.
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
+    }
+
+    // MARK: - A resume owed while busy
+
+    /// Backgrounding while the review sheet is up, then returning, then dismissing.
+    ///
+    /// `resumeSession()` is the only thing that restarts the session after launch, so a
+    /// resume skipped because the device was busy is never retried by anything else. An
+    /// earlier version returned outright and left the viewfinder dead until the app was
+    /// backgrounded and foregrounded a second time.
+    func testResumeDeferredWhileBusyRunsOnReturnToIdle() async {
+        isolatePersistedCaptureDefaults()
+        let fake = FakeCamera()
+        fake.lenses = [Self.backLens]
+        fake.currentLens = Self.backLens
+        let vm = CameraViewModel(camera: fake)
+        await vm.start()
+        vm.phase = .done                       // review sheet up
+        fake.reset()
+
+        vm.handleScenePhase(.background)
+        vm.handleScenePhase(.active)
+        await drain()
+        // Still busy: stopped, but nothing re-applied yet.
+        XCTAssertEqual(fake.calls, [.stop])
+
+        vm.dismissReview()                     // phase → .idle
+        await settle { fake.calls.contains(.start) }
+
+        XCTAssertTrue(fake.calls.contains(.start))
+        XCTAssertTrue(fake.calls.contains(.setFocus(lensPosition: vm.lensPosition)))
+    }
+
+    /// The other half: a `.active` that never followed a `.background` must not resume,
+    /// since nothing was stopped and the bracket owns the device. A Control Center pull
+    /// mid-capture is the real case.
+    func testActiveWithoutBackgroundDoesNotResumeWhileBusy() async {
+        isolatePersistedCaptureDefaults()
+        let fake = FakeCamera()
+        fake.lenses = [Self.backLens]
+        fake.currentLens = Self.backLens
+        let vm = CameraViewModel(camera: fake)
+        await vm.start()
+        vm.phase = .capturing(frame: 3, of: 8)
+        fake.reset()
+
+        vm.handleScenePhase(.active)
+        await drain()
+        XCTAssertEqual(fake.calls, [])
+
+        // And returning to idle must not then fire a resume that was never owed.
+        vm.phase = .idle
+        await drain()
+        XCTAssertEqual(fake.calls, [])
     }
 }

@@ -79,7 +79,15 @@ final class CameraViewModel: ObservableObject {
 
     // Bracket
     @Published var stepCount: Int { didSet { persistDefaultsIfLoaded() } }
-    @Published var phase: Phase = .idle
+    @Published var phase: Phase = .idle {
+        didSet {
+            // A resume deferred because the device was busy is owed until it happens.
+            // Returning to idle is the moment it becomes safe.
+            guard phase == .idle, needsResume else { return }
+            needsResume = false
+            scheduleResume()
+        }
+    }
     @Published var resultImage: UIImage?
     @Published var depthMapImage: UIImage?
     @Published var lastSet: StackSet?
@@ -129,6 +137,17 @@ final class CameraViewModel: ObservableObject {
 
     /// The most recent lens switch, so the next one can wait for it. See `selectLens`.
     private var lensSwitchTask: Task<Void, Never>?
+
+    /// The session was stopped by a background trip and has not been brought back yet.
+    /// `resumeSession()` is the only thing that restarts it after launch, so a resume
+    /// that gets skipped is not retried by anything else — it has to be remembered.
+    private var needsResume = false
+
+    /// The most recent resume, so a second one waits rather than interleaving. Two
+    /// resumes running at once can put a `lockExposure` between the other's settle and
+    /// its white-balance write, and the lock would freeze the colour that was about to
+    /// be replaced.
+    private var resumeTask: Task<Void, Never>?
 
     /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
     /// observers don't immediately push the rounded values back over it. See
@@ -261,7 +280,12 @@ final class CameraViewModel: ObservableObject {
                 // `cycleLens()` all describing the wrong module while the new one is live.
                 // Restore only if this is still the switch the UI is showing; a later tap
                 // may already have claimed a different lens.
-                if selectedLensID == id { selectedLensID = previousLensID }
+                // Roll back to what the service says is actually attached, not to the
+                // lens the previous tap was aiming at. `previousLensID` is the optimistic
+                // claim made at tap time, so with two failures in a row it names a lens
+                // that was never attached either — reintroducing exactly the mismatch
+                // this rollback exists to prevent.
+                if selectedLensID == id { selectedLensID = camera.currentLens?.id ?? previousLensID }
                 report(error)
                 return
             }
@@ -522,6 +546,7 @@ final class CameraViewModel: ObservableObject {
         switch phase {
         case .background:
             camera.stop()
+            needsResume = true
             // Stopping the session extinguishes the torch in hardware; keep the UI
             // from claiming it is still on.
             if torchEnabled { torchEnabled = false }
@@ -547,15 +572,34 @@ final class CameraViewModel: ObservableObject {
             // push the *slider's* focus position, which is stale mid-sweep, so the
             // frame in flight would be shot at the wrong distance.
             //
-            // A real `.background` fails the pending capture and ends the bracket, so by
-            // the time `.active` follows that path, `phase` is back to `.idle` and the
-            // resume runs normally.
+            // Deferred, not dropped. An earlier version simply returned here, which was
+            // wrong: `resumeSession()` is the only thing that restarts the session after
+            // launch, so a skipped resume was never retried by anything. Backgrounding
+            // while the review sheet was up — an ordinary thing to do — left the
+            // viewfinder dead until the app was backgrounded and foregrounded a second
+            // time. The claim that a background trip always returns with `phase` back at
+            // `.idle` was also false: `stop()` fails the pending capture asynchronously
+            // and the bracket then spends up to 1.5 s in a settle wait, none of which
+            // runs while suspended. `needsResume` survives instead, and `phase`'s
+            // observer drains it on the way back to idle.
+            //
             // `self.` is load-bearing: the parameter is also called `phase`, and it is a
             // ScenePhase, which has no `.idle`.
             guard self.phase == .idle else { return }
-            Task { await resumeSession() }
+            needsResume = false
+            scheduleResume()
         default:
             break
+        }
+    }
+
+    /// Chains resumes so two never interleave, and so a deferred one runs after any
+    /// resume already in flight.
+    private func scheduleResume() {
+        let previous = resumeTask
+        resumeTask = Task {
+            await previous?.value
+            await resumeSession()
         }
     }
 

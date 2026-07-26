@@ -1,30 +1,6 @@
 import XCTest
 @testable import StackShot
 
-/// Every `capture.*` key `CaptureDefaults` owns. `CameraViewModel` loads and saves through
-/// `CaptureDefaults`, which is hard-wired to `UserDefaults.standard` — the view model takes
-/// an injected camera but no injected defaults, so a test cannot point it at its own suite.
-/// The next best thing is to scrub exactly these keys before each view model is built and
-/// again on teardown: tests then neither inherit each other's persisted writes nor leave
-/// any behind for the host app.
-private let persistedCaptureKeys = [
-    "capture.evBias",
-    "capture.kelvin",
-    "capture.tint",
-    "capture.stepCount",
-    "capture.peakingEnabled",
-    "capture.zebraEnabled",
-    "capture.outputFormat",
-    "capture.autoSaveToPhotos",
-    "capture.squareGuideEnabled",
-]
-
-private func clearPersistedCaptureDefaults() {
-    for key in persistedCaptureKeys {
-        UserDefaults.standard.removeObject(forKey: key)
-    }
-}
-
 /// Covers every path where `CameraViewModel` state has to reach the device. All of it runs
 /// against `FakeCamera`, so these are the paths that used to be reachable only by holding a
 /// phone and looking at the viewfinder — which is how several of the bugs pinned here
@@ -35,8 +11,7 @@ final class CameraControlStateTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeViewModel(_ camera: FakeCamera) -> CameraViewModel {
-        clearPersistedCaptureDefaults()
-        addTeardownBlock { clearPersistedCaptureDefaults() }
+        isolatePersistedCaptureDefaults()
         return CameraViewModel(camera: camera)
     }
 
@@ -143,6 +118,39 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertEqual(fake.whiteBalance?.kelvin, 9200)
         XCTAssertEqual(fake.whiteBalance?.tint, -80)
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
+    }
+
+    /// The suppression must be released, not just applied.
+    ///
+    /// `withWhiteBalancePushSuppressed` relies on a `defer` to clear the flag. Delete that
+    /// `defer` and every other test still passes, because the gray-card tests are the last
+    /// thing their tests do — while in the app the Kelvin slider would silently stop
+    /// reaching the device for the rest of the session, which is the exact bug the push
+    /// was added to fix.
+    func testWhiteBalancePushResumesAfterAGrayCardLock() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.neutralWhiteBalanceResult = (kelvin: 4600, tint: 3)
+        vm.lockGrayCardWB()
+        fake.reset()
+
+        vm.kelvin = 4200
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4200, tint: vm.tint)])
+    }
+
+    /// And released even when the measurement fails, since the flag is set around the
+    /// assignment either way.
+    func testWhiteBalancePushResumesAfterAFailedGrayCardLock() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("lockNeutralWhiteBalance", with: CameraError.configurationFailed)
+        vm.lockGrayCardWB()
+        fake.reset()
+
+        vm.kelvin = 3900
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 3900, tint: vm.tint)])
     }
 
     func testGrayCardLockFailureIsReportedAndLeavesTheSlidersAlone() {
@@ -424,8 +432,8 @@ final class CameraControlStateTests: XCTestCase {
     /// Both persisted manual settings have to reach the device on launch, or the viewfinder
     /// opens on the camera's own guess while the panel shows last session's numbers.
     func testStartPushesThePersistedExposureBiasAndWhiteBalance() async {
-        clearPersistedCaptureDefaults()
-        addTeardownBlock { clearPersistedCaptureDefaults() }
+        isolatePersistedCaptureDefaults()
+        addTeardownBlock { isolatePersistedCaptureDefaults() }
         UserDefaults.standard.set(Float(1.5), forKey: "capture.evBias")
         UserDefaults.standard.set(Float(3200), forKey: "capture.kelvin")
         UserDefaults.standard.set(Float(-10), forKey: "capture.tint")
