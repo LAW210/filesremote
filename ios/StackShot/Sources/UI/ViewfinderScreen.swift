@@ -120,10 +120,19 @@ struct ViewfinderScreen: View {
                 .tint(.yellow)
                 .disabled(vm.lenses.count < 2 || isBusy)
 
-            Label(vm.exposureLocked ? "Locked" : "Live",
+            // Status, not a control — which is exactly why it has to name what it is
+            // reporting. "Locked" alone left the owner asking whether it meant focus, the
+            // lens, or exposure; an earlier "AE-L 5000K" was worse, implying the Kelvin
+            // value was the thing frozen. Every frame in a bracket must share one
+            // exposure or the merge bands, so this is the app's most consequential state
+            // and it should read unambiguously from across a light box.
+            Label(vm.exposureLocked ? "Exposure locked" : "Exposure live",
                   systemImage: vm.exposureLocked ? "lock.fill" : "lock.open")
                 .font(.caption)
                 .foregroundStyle(vm.exposureLocked ? .green : .orange)
+                .accessibilityLabel(vm.exposureLocked
+                                    ? "Exposure locked for the stack"
+                                    : "Exposure still metering — lock it before capturing")
 
             Spacer()
 
