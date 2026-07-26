@@ -1,0 +1,58 @@
+# XcodeGen spec — run `xcodegen generate` in this directory (brew install xcodegen)
+name: StackShot
+options:
+  bundleIdPrefix: com.lawsecurity
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+targets:
+  StackShot:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Bridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lawsecurity.stackshot
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_OBJC_BRIDGING_HEADER: Bridge/StackShot-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: c++17
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        # Uncomment after running scripts/fetch_engine.sh and adding opencv2.xcframework:
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS: ENGINE_EMBEDDED
+        # OTHER_CPLUSPLUSFLAGS: "-DENGINE_EMBEDDED=1"
+    info:
+      path: Info.plist
+      properties:
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSCameraUsageDescription: "StackShot uses the camera to capture focus-bracketed photos."
+        NSPhotoLibraryAddUsageDescription: "StackShot saves your stacked photos to your library."
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+
+  StackShotTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lawsecurity.stackshot.tests
+        SWIFT_VERSION: "5.9"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    dependencies:
+      - target: StackShot
+
+schemes:
+  StackShot:
+    build:
+      targets:
+        StackShot: all
+        StackShotTests: [test]
+    test:
+      targets:
+        - StackShotTests

@@ -1,0 +1,65 @@
+# Compiles the StackShot iOS app and runs its unit tests on macOS
+# whenever changes touch the ios/ directory (or this workflow file).
+name: iOS build & test
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-tests.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios-tests.yml"
+
+jobs:
+  build-and-test:
+    # macos-15 ships Xcode 16.x, required to open the project format that
+    # current xcodegen releases emit (format 77 broke Xcode 15.4 on macos-14).
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install xcodegen swiftlint
+
+      # Warnings annotate the PR; only lint errors fail the job.
+      - name: SwiftLint
+        working-directory: ios/StackShot
+        run: swiftlint lint --reporter github-actions-logging
+
+      - name: Generate Xcode project
+        working-directory: ios/StackShot
+        run: xcodegen generate
+
+      - name: Build and test
+        working-directory: ios/StackShot
+        # Pick whatever iPhone simulator this runner image actually provides
+        # instead of hardcoding a device name that rotates between images.
+        run: |
+          set -o pipefail
+          DEVICE_ID=$(xcrun simctl list devices available --json | python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [d for devs in data['devices'].values() for d in devs
+                     if d.get('isAvailable') and d['name'].startswith('iPhone')]
+          print(devices[0]['udid'])
+          ")
+          echo "Using simulator: $DEVICE_ID"
+          xcodebuild \
+            -project StackShot.xcodeproj \
+            -scheme StackShot \
+            -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            -resultBundlePath TestResults.xcresult \
+            test
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ios/StackShot/TestResults.xcresult
+          retention-days: 14
