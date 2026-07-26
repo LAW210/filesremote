@@ -154,11 +154,15 @@ final class SessionLifecycleTests: XCTestCase {
 
     // MARK: - Launch race
 
-    /// The first `.active` arrives before `configure()` has returned: there are no
-    /// lenses yet and we are not in preview mode. `start()` owns bringing the session
-    /// up in that case, so `handleScenePhase` must do nothing at all — starting here
-    /// would race a session that is still being configured.
-    func testActiveBeforeConfigureCompletesStartsNothing() async {
+    /// `.active` with nothing configured attempts a start rather than returning.
+    ///
+    /// That case is ambiguous: it is either the first `.active` at launch, which arrives
+    /// before `configure()` returns, or a `configure()` that failed — most often denied
+    /// camera permission. Treating it as "do nothing" made the second unrecoverable:
+    /// granting access in iOS Settings and coming back left the viewfinder on a spinner
+    /// forever, because `.task` never runs a second time. `start()` is reentrancy-guarded,
+    /// so the launch case is safe — see the test below.
+    func testActiveWithNothingConfiguredAttemptsStart() async {
         isolateCaptureDefaults()
         let fake = FakeCamera()
         let vm = CameraViewModel(camera: fake)
@@ -166,10 +170,27 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertFalse(vm.isPreviewMode)
 
         vm.handleScenePhase(.active)
-        await settle()
+        await settle { fake.calls.contains(.configure) }
 
-        XCTAssertEqual(fake.calls, [])
+        XCTAssertTrue(fake.calls.contains(.start))
         XCTAssertNil(vm.errorMessage)
+    }
+
+    /// The launch race the guard originally existed for: `.task` calls `start()` while
+    /// the first `.active` also lands. Exactly one configuration must happen — a second
+    /// concurrent `start()` is a no-op, not a parallel reconfiguration of a live session.
+    func testConcurrentStartsConfigureOnlyOnce() async {
+        isolateCaptureDefaults()
+        let fake = FakeCamera()
+        let vm = CameraViewModel(camera: fake)
+
+        // Two starts in flight at once: the first claims the guard synchronously before
+        // suspending on configure(), so the second must find it taken and bail.
+        vm.handleScenePhase(.active)
+        vm.handleScenePhase(.active)
+        await settle { fake.calls.contains(.start) }
+
+        XCTAssertEqual(fake.calls.filter { $0 == .configure }.count, 1)
     }
 
     /// Preview mode (the Simulator) has no lenses by definition, so the "are we

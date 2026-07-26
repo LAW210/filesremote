@@ -441,11 +441,16 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertEqual(vm.kelvin, 3200)
         XCTAssertEqual(vm.tint, -10)
         XCTAssertEqual(vm.selectedLensID, "wide")
+        // Focus is pushed here too: a freshly attached device defaults to continuous AF,
+        // so without it the slider would read its default while the lens did something
+        // else. `resumeSession()` always did this; `start()` used to not, and the two
+        // startup paths disagreeing is what made the gap easy to miss.
         XCTAssertEqual(fake.calls, [
             .configure,
             .start,
             .setExposureBias(1.5),
             .setWhiteBalance(kelvin: 3200, tint: -10),
+            .setFocus(lensPosition: vm.lensPosition),
         ])
         XCTAssertEqual(fake.exposureBias, 1.5)
         XCTAssertEqual(fake.whiteBalance?.kelvin, 3200)
