@@ -110,11 +110,21 @@ final class CameraService: NSObject, CameraControlling {
 
         // Labels are magnifications relative to the wide camera, so the button reads as
         // one scale rather than mixing a zoom factor with a lens type.
+        //
+        // The telephoto figure is the one thing here that is device-specific: 5x is the
+        // iPhone 16 Pro's tetraprism (120mm). It would read wrong on a 15 Pro (3x) or a
+        // non-Pro (2x). Hardcoded rather than derived from `videoFieldOfView` because the
+        // arithmetic cannot be checked without the hardware, and this app targets one
+        // known phone — but that is the line to change if it ever runs on another.
+        //
+        // Note there are exactly three buttons, not four. The "2x" in Apple's own camera
+        // app is a centre crop of the 48MP main sensor, not a separate lens, so it is a
+        // zoom factor on the wide device rather than something `DiscoverySession` returns.
         deviceLenses = discovery.devices.map { device in
             let name: String
             switch device.deviceType {
             case .builtInUltraWideCamera: name = "0.5\u{00D7}"
-            case .builtInTelephotoCamera: name = "2\u{00D7}"
+            case .builtInTelephotoCamera: name = "5\u{00D7}"
             default: name = "1\u{00D7}"
             }
             return DeviceLens(id: device.uniqueID, name: name, device: device)
