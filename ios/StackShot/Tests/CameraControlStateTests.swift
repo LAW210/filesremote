@@ -432,8 +432,9 @@ final class CameraControlStateTests: XCTestCase {
     /// Both persisted manual settings have to reach the device on launch, or the viewfinder
     /// opens on the camera's own guess while the panel shows last session's numbers.
     func testStartPushesThePersistedExposureBiasAndWhiteBalance() async {
+        // Registers its own snapshot/restore teardown, so the keys written below are
+        // undone with everything else.
         isolatePersistedCaptureDefaults()
-        addTeardownBlock { isolatePersistedCaptureDefaults() }
         UserDefaults.standard.set(Float(1.5), forKey: "capture.evBias")
         UserDefaults.standard.set(Float(3200), forKey: "capture.kelvin")
         UserDefaults.standard.set(Float(-10), forKey: "capture.tint")
