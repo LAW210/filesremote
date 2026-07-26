@@ -24,11 +24,11 @@ final class FocusBracketController {
         case capturing(frame: Int, of: Int)
     }
 
-    private let camera: CameraService
+    private let camera: CameraControlling
     private let store: StackStore
     private(set) var isCancelled = false
 
-    init(camera: CameraService, store: StackStore = .shared) {
+    init(camera: CameraControlling = CameraService(), store: StackStore = .shared) {
         self.camera = camera
         self.store = store
     }
@@ -141,7 +141,7 @@ final class FocusBracketController {
             set.frames.append(.init(index: i, lensPosition: pos,
                                     fileName: fileName, capturedAt: Date()))
 
-            let actualLensPosition = camera.device?.lensPosition ?? -1
+            let actualLensPosition = camera.currentLensPosition ?? -1
             let elapsed = Date().timeIntervalSince(frameStart)
             log.line(String(
                 format: "frame %d/%d: target=%.4f actual=%.4f settle=%@ attempts=%d " +

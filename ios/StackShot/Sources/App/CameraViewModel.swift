@@ -13,7 +13,7 @@ final class CameraViewModel: ObservableObject {
         case done
     }
 
-    let camera = CameraService()
+    let camera: CameraControlling
     private let preview = PreviewFrameProcessor()
     private let stacking = StackingService.shared
     private var bracket: FocusBracketController?
@@ -34,7 +34,7 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var isPreviewMode = false
 
     // Lens
-    @Published var lenses: [CameraService.Lens] = []
+    @Published var lenses: [LensInfo] = []
     @Published var selectedLensID: String?
 
     // Brightness (EV compensation on the camera's metering) and colour (Kelvin WB)
@@ -118,6 +118,11 @@ final class CameraViewModel: ObservableObject {
     /// `UserDefaults` during `init`.
     private var isLoaded = false
 
+    /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
+    /// observers don't immediately push the rounded values back over it. See
+    /// `lockGrayCardWB()`.
+    private var suppressWhiteBalancePush = false
+
     /// Label for the lens button — the lens currently attached.
     var currentLensName: String {
         lenses.first { $0.id == selectedLensID }?.name ?? "—"
@@ -137,7 +142,10 @@ final class CameraViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
-    init() {
+    /// The camera is injected so tests can drive every control path with a fake; the
+    /// default keeps production call sites (`StackShotApp`) writing `CameraViewModel()`.
+    init(camera: CameraControlling = CameraService()) {
+        self.camera = camera
         let defaults = CaptureDefaults.load()
         _evBias = Published(initialValue: defaults.evBias)
         _kelvin = Published(initialValue: defaults.kelvin)
@@ -239,6 +247,7 @@ final class CameraViewModel: ObservableObject {
     /// as `pushFocus()`. There is no continuous-auto WB path in this app: colour is
     /// always the value shown in the panel.
     private func pushWhiteBalance() {
+        guard !suppressWhiteBalancePush else { return }
         try? camera.setWhiteBalance(kelvin: kelvin, tint: tint)
     }
 
@@ -273,15 +282,32 @@ final class CameraViewModel: ObservableObject {
     }
 
     /// Locks white balance from a neutral gray/white card filling the frame.
+    ///
+    /// The measured gray-world gains are what the device keeps. Reflecting the equivalent
+    /// Kelvin/tint back into the sliders must therefore NOT push them out again: that
+    /// would re-derive gains from numbers that have been round-tripped and clamped to the
+    /// slider's range, quietly throwing away the measurement the card was held up for.
+    /// A card reading outside `kelvinRange` shows the nearest value the slider can
+    /// represent while the device holds the real one.
     func lockGrayCardWB() {
         do {
             let result = try camera.lockNeutralWhiteBalance()
-            kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
-            tint = result.tint.clamped(to: AppConfig.Exposure.tintRange)
+            withWhiteBalancePushSuppressed {
+                kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
+                tint = result.tint.clamped(to: AppConfig.Exposure.tintRange)
+            }
             persistDefaults()
         } catch {
             report(error)
         }
+    }
+
+    /// Runs `body` with the `kelvin`/`tint` observers' device push disabled, for the one
+    /// case where the values are being set *from* the device rather than sent to it.
+    private func withWhiteBalancePushSuppressed(_ body: () -> Void) {
+        suppressWhiteBalancePush = true
+        defer { suppressWhiteBalancePush = false }
+        body()
     }
 
     // MARK: - Persistence

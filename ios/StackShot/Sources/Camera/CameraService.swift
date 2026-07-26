@@ -3,23 +3,30 @@ import UIKit
 
 /// Wraps AVCaptureSession: lens selection, manual focus/exposure/white balance, RAW capture,
 /// and a video data output that feeds the viewfinder, focus peaking, and the loupe.
-final class CameraService: NSObject {
+final class CameraService: NSObject, CameraControlling {
 
-    struct Lens: Identifiable {
+    /// A lens plus the device behind it. Stays inside this file: callers see `LensInfo`.
+    private struct DeviceLens {
         let id: String
         let name: String            // "0.5x", "1x", "3x"
         let device: AVCaptureDevice
+
+        var info: LensInfo { LensInfo(id: id, name: name) }
     }
 
     let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "stackshot.session")
     private let videoQueue = DispatchQueue(label: "stackshot.video")
 
-    private(set) var lenses: [Lens] = []
-    private(set) var currentLens: Lens?
+    private var deviceLenses: [DeviceLens] = []
+    private var currentDeviceLens: DeviceLens?
+
     private var videoInput: AVCaptureDeviceInput?
     private let photoOutput = AVCapturePhotoOutput()
     private let videoOutput = AVCaptureVideoDataOutput()
+
+    var lenses: [LensInfo] { deviceLenses.map(\.info) }
+    var currentLens: LensInfo? { currentDeviceLens?.info }
 
     /// True when `configureOnQueue()` found no back camera at all — the iOS Simulator,
     /// which has no camera hardware. Rather than leave the whole UI stuck behind a
@@ -71,18 +78,18 @@ final class CameraService: NSObject {
         // a physical phone. No session/input/output configuration happens below.
         guard !discovery.devices.isEmpty else {
             isPreviewMode = true
-            lenses = []
+            deviceLenses = []
             return
         }
 
-        lenses = discovery.devices.map { device in
+        deviceLenses = discovery.devices.map { device in
             let name: String
             switch device.deviceType {
             case .builtInUltraWideCamera: name = "0.5x"
             case .builtInTelephotoCamera: name = "Tele"
             default: name = "1x"
             }
-            return Lens(id: device.uniqueID, name: name, device: device)
+            return DeviceLens(id: device.uniqueID, name: name, device: device)
         }
         // Default to whichever back camera focuses closest. StackShot is for macro
         // work on small objects, and the lens with the shortest minimum focus
@@ -90,12 +97,12 @@ final class CameraService: NSObject {
         // actually get close, which is also what Apple's own macro mode switches to.
         // minimumFocusDistance is in millimetres and reports -1 when unknown, so
         // only positive values are usable; if none report one, fall back to "1x".
-        let closestFocusing = lenses
+        let closestFocusing = deviceLenses
             .filter { $0.device.minimumFocusDistance > 0 }
             .min { $0.device.minimumFocusDistance < $1.device.minimumFocusDistance }
         guard let initial = closestFocusing
-            ?? lenses.first(where: { $0.name == "1x" })
-            ?? lenses.first else {
+            ?? deviceLenses.first(where: { $0.name == "1x" })
+            ?? deviceLenses.first else {
             throw CameraError.noCamera
         }
         try attach(lens: initial)
@@ -121,7 +128,7 @@ final class CameraService: NSObject {
         }
     }
 
-    private func attach(lens: Lens) throws {
+    private func attach(lens: DeviceLens) throws {
         // Construct the new input before detaching the old one, and put the old one
         // back if the new one turns out to be unusable — otherwise a failed lens
         // switch commits a session with no video input at all (black viewfinder,
@@ -138,13 +145,13 @@ final class CameraService: NSObject {
                 // isn't attached — clear our state so callers see the truth and can
                 // recover by selecting a lens again.
                 videoInput = nil
-                currentLens = nil
+                currentDeviceLens = nil
             }
             throw CameraError.configurationFailed
         }
         session.addInput(input)
         videoInput = input
-        currentLens = lens
+        currentDeviceLens = lens
     }
 
     /// Starts the session and returns once it is actually running, so callers can
@@ -202,12 +209,19 @@ final class CameraService: NSObject {
         previewTimer = timer
     }
 
-    func select(lens: Lens) async throws {
+    func select(lens: LensInfo) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             sessionQueue.async {
+                // Callers hand back an identity from `lenses`, so this resolves on the
+                // session queue that owns `deviceLenses` rather than trusting a device
+                // reference that crossed a thread boundary.
+                guard let target = self.deviceLenses.first(where: { $0.id == lens.id }) else {
+                    cont.resume(throwing: CameraError.noCamera)
+                    return
+                }
                 do {
                     self.session.beginConfiguration()
-                    try self.attach(lens: lens)
+                    try self.attach(lens: target)
                     self.session.commitConfiguration()
                     self.applyPortraitRotation()
                     cont.resume()
@@ -221,7 +235,12 @@ final class CameraService: NSObject {
 
     // MARK: - Manual controls
 
-    var device: AVCaptureDevice? { currentLens?.device }
+    private var device: AVCaptureDevice? { currentDeviceLens?.device }
+
+    /// Where the lens actually is. Exposed instead of the device itself so the capture
+    /// log can record the position reached without anything outside this file holding
+    /// an `AVCaptureDevice`.
+    var currentLensPosition: Float? { device?.lensPosition }
 
     /// What the camera is currently metering at — shown live, and recorded once locked.
     var currentExposure: (iso: Float, shutterSeconds: Double)? {
@@ -250,7 +269,7 @@ final class CameraService: NSObject {
 
     /// Waits for metering to stop hunting, so a lock captures a settled value rather
     /// than whatever the algorithm happened to be passing through.
-    func waitForExposureSettle(timeout: TimeInterval = 1.5) async {
+    func waitForExposureSettle(timeout: TimeInterval) async {
         // Simulator-only scaffolding: nothing is metering, so there is nothing to wait
         // for — return immediately as if it had already settled.
         if isPreviewMode { return }
@@ -354,7 +373,7 @@ final class CameraService: NSObject {
     /// Returns whether it actually settled, so callers can distinguish a clean
     /// settle from a timeout for capture diagnostics.
     @discardableResult
-    func waitForFocusSettle(target: Float, tolerance: Float = 0.005, timeout: TimeInterval = 1.5) async -> Bool {
+    func waitForFocusSettle(target: Float, tolerance: Float, timeout: TimeInterval) async -> Bool {
         // Simulator-only scaffolding: there is no lens hunting to wait out — report an
         // immediate clean settle so callers proceed as they would on a real device.
         if isPreviewMode { return true }
