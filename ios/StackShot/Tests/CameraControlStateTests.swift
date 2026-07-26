@@ -1,0 +1,466 @@
+import XCTest
+@testable import StackShot
+
+/// Every `capture.*` key `CaptureDefaults` owns. `CameraViewModel` loads and saves through
+/// `CaptureDefaults`, which is hard-wired to `UserDefaults.standard` — the view model takes
+/// an injected camera but no injected defaults, so a test cannot point it at its own suite.
+/// The next best thing is to scrub exactly these keys before each view model is built and
+/// again on teardown: tests then neither inherit each other's persisted writes nor leave
+/// any behind for the host app.
+private let persistedCaptureKeys = [
+    "capture.evBias",
+    "capture.kelvin",
+    "capture.tint",
+    "capture.stepCount",
+    "capture.peakingEnabled",
+    "capture.zebraEnabled",
+    "capture.outputFormat",
+    "capture.autoSaveToPhotos",
+    "capture.squareGuideEnabled",
+]
+
+private func clearPersistedCaptureDefaults() {
+    for key in persistedCaptureKeys {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
+/// Covers every path where `CameraViewModel` state has to reach the device. All of it runs
+/// against `FakeCamera`, so these are the paths that used to be reachable only by holding a
+/// phone and looking at the viewfinder — which is how several of the bugs pinned here
+/// shipped in the first place.
+@MainActor
+final class CameraControlStateTests: XCTestCase {
+
+    // MARK: - Helpers
+
+    private func makeViewModel(_ camera: FakeCamera) -> CameraViewModel {
+        clearPersistedCaptureDefaults()
+        addTeardownBlock { clearPersistedCaptureDefaults() }
+        return CameraViewModel(camera: camera)
+    }
+
+    /// Waits for `condition`, which is how the results of `selectLens()` and
+    /// `lockExposure()` are observed: both do their device work inside a `Task` with no
+    /// handle to await. Awaiting inside the loop releases the main actor so that task can
+    /// run, and the poll returns the instant its work lands rather than after a fixed
+    /// delay — the 1 ms sleep is the polling granularity, not a guess at how long the work
+    /// takes. `FakeCamera` records calls synchronously inside that task, so once the
+    /// condition holds, `calls` is already complete.
+    private func waitUntil(_ description: String,
+                           timeout: TimeInterval = 5,
+                           file: StaticString = #filePath,
+                           line: UInt = #line,
+                           _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for \(description)", file: file, line: line)
+                return
+            }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+    }
+
+    /// The lens IDs from a call log, in order — lens switches are surrounded by the EV /
+    /// white balance / focus pushes that follow them, so the switches themselves are only
+    /// legible in isolation.
+    private func selectedLensIDs(_ calls: [FakeCamera.Call]) -> [String] {
+        calls.compactMap { (call: FakeCamera.Call) -> String? in
+            guard case .select(let lensID) = call else { return nil }
+            return lensID
+        }
+    }
+
+    private func threeLenses() -> [LensInfo] {
+        [LensInfo(id: "wide", name: "1x"),
+         LensInfo(id: "ultra", name: "0.5x"),
+         LensInfo(id: "tele", name: "Tele")]
+    }
+
+    // MARK: - White balance
+
+    /// Regression guard: both colour sliders used to change nothing on the device until a
+    /// later `lockExposure()` happened to apply them, so you could not see the colour you
+    /// were choosing. Each has to push the *pair*, since the device takes them together.
+    func testChangingKelvinPushesTheCurrentKelvinAndTintPair() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.tint = 12
+        fake.reset()
+
+        vm.kelvin = 4300
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4300, tint: 12)])
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 4300)
+        XCTAssertEqual(fake.whiteBalance?.tint, 12)
+    }
+
+    func testChangingTintPushesTheCurrentKelvinAndTintPair() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.kelvin = 3200
+        fake.reset()
+
+        vm.tint = -20
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 3200, tint: -20)])
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 3200)
+        XCTAssertEqual(fake.whiteBalance?.tint, -20)
+    }
+
+    // MARK: - Gray card
+
+    /// The measured gains are what the device keeps. Reflecting the equivalent Kelvin/tint
+    /// into the sliders must not push them back out — that would re-derive gains from
+    /// round-tripped numbers and throw away the measurement the card was held up for.
+    func testGrayCardLockDoesNotPushTheSliderValuesBackOverTheMeasurement() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.neutralWhiteBalanceResult = (kelvin: 4870, tint: 7)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
+        XCTAssertEqual(vm.kelvin, 4870)
+        XCTAssertEqual(vm.tint, 7)
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 4870)
+        XCTAssertEqual(fake.whiteBalance?.tint, 7)
+    }
+
+    /// A card reading outside the slider's range shows the nearest representable value
+    /// while the device holds the real one — so the clamp must land in the UI only, and
+    /// must still not be pushed back.
+    func testGrayCardLockClampsTheSlidersButLeavesTheDeviceOnTheMeasuredValues() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.neutralWhiteBalanceResult = (kelvin: 9200, tint: -80)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertEqual(vm.kelvin, AppConfig.Exposure.kelvinRange.upperBound)
+        XCTAssertEqual(vm.tint, AppConfig.Exposure.tintRange.lowerBound)
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 9200)
+        XCTAssertEqual(fake.whiteBalance?.tint, -80)
+        XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
+    }
+
+    func testGrayCardLockFailureIsReportedAndLeavesTheSlidersAlone() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        let before = (kelvin: vm.kelvin, tint: vm.tint)
+        fake.fail("lockNeutralWhiteBalance", with: CameraError.configurationFailed)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertEqual(vm.kelvin, before.kelvin)
+        XCTAssertEqual(vm.tint, before.tint)
+        XCTAssertNotNil(vm.errorMessage)
+    }
+
+    // MARK: - Exposure bias
+
+    func testChangingEVBiasPushesItToTheDevice() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.reset()
+
+        vm.evBias = 1.5
+
+        XCTAssertEqual(fake.calls, [.setExposureBias(1.5)])
+        XCTAssertEqual(fake.exposureBias, 1.5)
+    }
+
+    /// While exposure is locked the EV slider must not reach the device: the whole point of
+    /// the lock is that every frame in the bracket meters identically.
+    func testChangingEVBiasWhileExposureIsLockedPushesNothing() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.exposureLocked = true
+        fake.reset()
+
+        vm.evBias = 2
+
+        XCTAssertEqual(fake.calls, [])
+        XCTAssertNil(fake.exposureBias)
+    }
+
+    /// Unlocking has to re-assert the slider's value, since the device is still holding
+    /// whatever it was locked at.
+    func testUnlockingExposureReappliesTheCurrentEVBias() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.evBias = 1
+        vm.exposureLocked = true
+        fake.reset()
+
+        vm.unlockExposure()
+
+        XCTAssertFalse(vm.exposureLocked)
+        XCTAssertEqual(fake.calls, [.setExposureBias(1)])
+    }
+
+    // MARK: - Focus
+
+    func testChangingLensPositionPushesFocusToTheDevice() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.reset()
+
+        vm.lensPosition = 0.3
+
+        XCTAssertEqual(fake.calls, [.setFocus(lensPosition: 0.3)])
+        XCTAssertEqual(fake.focusPosition, 0.3)
+    }
+
+    // MARK: - Lock sequence
+
+    /// Order is the whole contract here: settling before the lock is what makes the locked
+    /// values correct, and re-applying colour *after* the lock is what stops the device's
+    /// own white balance decision from surviving it. The end state cannot tell these apart,
+    /// so this asserts against the call log.
+    func testLockExposureSettlesThenLocksThenReappliesWhiteBalance() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.kelvin = 3200
+        vm.tint = 5
+        fake.reset()
+
+        vm.lockExposure()
+        await waitUntil("the exposure lock to finish") { vm.exposureLocked }
+
+        XCTAssertEqual(fake.calls, [
+            .waitForExposureSettle(timeout: 1.5),
+            .lockExposure,
+            .setWhiteBalance(kelvin: 3200, tint: 5),
+        ])
+    }
+
+    /// A throw partway through must not leave the UI claiming a lock that the device does
+    /// not have — the shutter is gated on this flag.
+    func testLockExposureFailingPartwayLeavesExposureUnlocked() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("lockExposure", with: CameraError.configurationFailed)
+        fake.reset()
+
+        vm.lockExposure()
+        await waitUntil("the lock failure to be reported") { vm.errorMessage != nil }
+
+        XCTAssertFalse(vm.exposureLocked)
+        XCTAssertEqual(fake.calls, [.waitForExposureSettle(timeout: 1.5), .lockExposure])
+    }
+
+    /// The same applies when the failure lands on the trailing white balance push: the
+    /// frames would then be shot under a colour nobody chose, so the lock does not stand.
+    func testLockExposureFailingOnWhiteBalanceLeavesExposureUnlocked() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("setWhiteBalance", with: CameraError.configurationFailed)
+        fake.reset()
+
+        vm.lockExposure()
+        await waitUntil("the lock failure to be reported") { vm.errorMessage != nil }
+
+        XCTAssertFalse(vm.exposureLocked)
+    }
+
+    // MARK: - Lens cycling
+
+    /// Two quick taps must advance two lenses. They used to advance one: the next lens was
+    /// derived from `selectedLensID`, which stayed stale until the hardware switch returned,
+    /// so both taps computed the same target. The fix claims the lens synchronously.
+    ///
+    /// The lens list is assigned directly rather than via `start()`, so this test exercises
+    /// only the cycling path and needs no preview/screen setup.
+    func testCyclingTwiceAdvancesTwoLenses() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        fake.reset()
+
+        vm.cycleLens()
+        vm.cycleLens()
+
+        // Claimed immediately — this is the property the second tap reads.
+        XCTAssertEqual(vm.selectedLensID, "tele")
+        await waitUntil("both lens switches to reach the device") {
+            selectedLensIDs(fake.calls).count == 2
+        }
+        XCTAssertEqual(selectedLensIDs(fake.calls), ["ultra", "tele"])
+    }
+
+    /// Cycling past the end wraps, so the button never dead-ends.
+    func testCyclingWrapsAroundToTheFirstLens() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "tele"
+        fake.reset()
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to reach the device") {
+            !selectedLensIDs(fake.calls).isEmpty
+        }
+
+        XCTAssertEqual(vm.selectedLensID, "wide")
+        XCTAssertEqual(selectedLensIDs(fake.calls), ["wide"])
+    }
+
+    /// The optimistic claim has to be undone when the switch fails, or the button label and
+    /// the next tap's arithmetic both describe a lens that was never attached.
+    func testFailedLensSwitchRestoresThePreviousSelection() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        fake.fail("select", with: CameraError.configurationFailed)
+        fake.reset()
+
+        vm.cycleLens()
+        XCTAssertEqual(vm.selectedLensID, "ultra")      // claimed before the await
+        await waitUntil("the failed switch to be reported") { vm.errorMessage != nil }
+
+        XCTAssertEqual(vm.selectedLensID, "wide")
+    }
+
+    /// A new module means new metering, new colour, and a lens sitting on continuous AF, so
+    /// everything manual has to be re-pushed and everything device-bound has to be dropped.
+    /// `lensPosition` doesn't change across the switch, so its `didSet` won't fire — the
+    /// explicit `setFocus` is the only thing that keeps the slider honest.
+    func testSuccessfulLensSwitchResetsDeviceStateAndRepushesTheManualControls() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        vm.evBias = 1
+        vm.kelvin = 4000
+        vm.lensPosition = 0.8
+        vm.nearAnchor = 0.2
+        vm.farAnchor = 0.9
+        vm.setTorch(true)
+        vm.exposureLocked = true
+        fake.reset()
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to finish") {
+            fake.calls.contains(.setFocus(lensPosition: 0.8))
+        }
+
+        XCTAssertFalse(vm.exposureLocked)
+        XCTAssertNil(vm.nearAnchor)
+        XCTAssertNil(vm.farAnchor)
+        XCTAssertFalse(vm.torchEnabled)
+        XCTAssertEqual(fake.calls, [
+            .select(lensID: "ultra"),
+            .setExposureBias(1),
+            .setWhiteBalance(kelvin: 4000, tint: 0),
+            .setFocus(lensPosition: 0.8),
+        ])
+        XCTAssertEqual(fake.exposureBias, 1)
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 4000)
+        XCTAssertEqual(fake.focusPosition, 0.8)
+    }
+
+    /// One lens is not a choice; the button must not thrash the device.
+    func testCyclingWithASingleLensDoesNothing() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = [LensInfo(id: "wide", name: "1x")]
+        vm.selectedLensID = "wide"
+        fake.reset()
+
+        vm.cycleLens()
+
+        XCTAssertEqual(fake.calls, [])
+        XCTAssertEqual(vm.selectedLensID, "wide")
+    }
+
+    // MARK: - Torch
+
+    func testTorchOnReachesTheDeviceAndSetsTheFlag() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.reset()
+
+        vm.setTorch(true)
+
+        XCTAssertTrue(vm.torchEnabled)
+        XCTAssertTrue(fake.torchOn)
+        XCTAssertEqual(fake.calls, [.setTorch(enabled: true)])
+    }
+
+    /// A failed switch-*off* must leave the flag true, because the torch is still lit.
+    /// Forcing it to false was right for a failed switch-on and wrong here: the icon
+    /// claimed the torch was out while it was burning into the frame.
+    func testFailedTorchSwitchOffLeavesTheFlagTrueBecauseTheTorchIsStillLit() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.setTorch(true)
+        fake.fail("setTorch", with: CameraError.torchUnavailable)
+
+        vm.setTorch(false)
+
+        XCTAssertTrue(vm.torchEnabled)
+        XCTAssertTrue(fake.torchOn)
+        XCTAssertNotNil(vm.errorMessage)
+    }
+
+    func testFailedTorchSwitchOnLeavesTheFlagFalse() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("setTorch", with: CameraError.torchUnavailable)
+
+        vm.setTorch(true)
+
+        XCTAssertFalse(vm.torchEnabled)
+        XCTAssertFalse(fake.torchOn)
+        XCTAssertNotNil(vm.errorMessage)
+    }
+
+    // MARK: - Startup
+
+    /// Both persisted manual settings have to reach the device on launch, or the viewfinder
+    /// opens on the camera's own guess while the panel shows last session's numbers.
+    func testStartPushesThePersistedExposureBiasAndWhiteBalance() async {
+        clearPersistedCaptureDefaults()
+        addTeardownBlock { clearPersistedCaptureDefaults() }
+        UserDefaults.standard.set(Float(1.5), forKey: "capture.evBias")
+        UserDefaults.standard.set(Float(3200), forKey: "capture.kelvin")
+        UserDefaults.standard.set(Float(-10), forKey: "capture.tint")
+
+        let fake = FakeCamera()
+        fake.lenses = threeLenses()
+        fake.currentLens = fake.lenses.first
+        let vm = CameraViewModel(camera: fake)
+
+        await vm.start()
+
+        XCTAssertEqual(vm.evBias, 1.5)
+        XCTAssertEqual(vm.kelvin, 3200)
+        XCTAssertEqual(vm.tint, -10)
+        XCTAssertEqual(vm.selectedLensID, "wide")
+        XCTAssertEqual(fake.calls, [
+            .configure,
+            .start,
+            .setExposureBias(1.5),
+            .setWhiteBalance(kelvin: 3200, tint: -10),
+        ])
+        XCTAssertEqual(fake.exposureBias, 1.5)
+        XCTAssertEqual(fake.whiteBalance?.kelvin, 3200)
+        XCTAssertEqual(fake.whiteBalance?.tint, -10)
+    }
+
+    /// A failed `configure()` must not go on to push controls at a camera that isn't there.
+    func testStartReportsConfigureFailureAndPushesNothing() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("configure", with: CameraError.noCamera)
+
+        await vm.start()
+
+        XCTAssertNotNil(vm.errorMessage)
+        XCTAssertEqual(fake.calls, [.configure])
+    }
+}
