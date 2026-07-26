@@ -531,6 +531,26 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             }
         }
     }
+
+    /// The safety net for a capture that is aborted before a photo is ever produced.
+    ///
+    /// AVFoundation guarantees this callback for every request, but NOT
+    /// `didFinishProcessingPhoto` — that one is skipped when the request dies early, as
+    /// it does if the session is reconfigured (a lens switch) while a frame is in flight.
+    /// Without this, the continuation is never resumed and never removed: the bracket
+    /// parks forever inside `await capturePhoto()`, never reaching its cancellation
+    /// checks, so even the Cancel button does nothing and the only way out is force-quit.
+    ///
+    /// Both callbacks funnel through the same `removeValue` on `sessionQueue`, so
+    /// whichever arrives second finds nothing and is a no-op — there is no double-resume.
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+                     error: Error?) {
+        sessionQueue.async {
+            guard let cont = self.inFlightCaptures.removeValue(forKey: resolvedSettings.uniqueID) else { return }
+            cont.resume(throwing: error ?? CameraError.captureInterrupted)
+        }
+    }
 }
 
 extension CameraService: AVCaptureVideoDataOutputSampleBufferDelegate {

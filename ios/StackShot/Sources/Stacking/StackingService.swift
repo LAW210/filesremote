@@ -55,12 +55,19 @@ final class StackingService {
                 at: directory.appendingPathComponent(other.mergedFileName))
         }
 
+        // Non-fatal, deliberately. The depth map is a diagnostic — every other path
+        // treats it as optional — and this write lands after the merged image is already
+        // safely on disk but before the manifest records it. A throw here therefore
+        // failed a stack that had actually succeeded: the user waited minutes, got an
+        // error, and the finished image sat on disk unreachable, with no re-stack path.
+        // Disk-full is exactly the case that hits this line first, since the depth PNG is
+        // the largest thing written after the merged file.
         var depthMapFileName: String?
         if let depthData = output.depthMap?.pngData() {
             let depthFileName = AppConfig.Stacking.depthMapFileName
-            try depthData.write(to: directory.appendingPathComponent(depthFileName),
-                                options: .atomic)
-            depthMapFileName = depthFileName
+            let written = (try? depthData.write(to: directory.appendingPathComponent(depthFileName),
+                                                options: .atomic)) != nil
+            depthMapFileName = written ? depthFileName : nil
         }
 
         var updated = set
@@ -174,8 +181,12 @@ final class StackingService {
     /// Adds the merged file to the photo library AS-IS — the exact encoded bytes go in,
     /// with no decode/re-encode pass, so the quality-95 JPEG is never compressed twice.
     func saveFileToPhotos(_ url: URL) async throws {
+        // `.limited` grants add-only writes just as `.authorized` does. Rejecting it
+        // meant anyone on limited photo access got "access was not granted" after every
+        // single capture, since auto-save is on by default — for a save that would
+        // actually have succeeded.
         let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard status == .authorized else { throw PhotosSaveError.notAuthorized }
+        guard status == .authorized || status == .limited else { throw PhotosSaveError.notAuthorized }
         try await PHPhotoLibrary.shared().performChanges {
             let request = PHAssetCreationRequest.forAsset()
             request.addResource(with: .photo, fileURL: url, options: nil)

@@ -26,6 +26,11 @@ final class CameraViewModel: ObservableObject {
     /// `PreviewFrameProcessor.Settings.loupeCenter`, which the UI can't read directly,
     /// so the viewfinder can draw a reticle at the point actually being inspected.
     @Published private(set) var loupeCenter = CGPoint(x: 0.5, y: 0.5)
+    /// The single source of truth for loupe zoom — mirrored into the frame processor,
+    /// and read by the loupe's label so the two can't disagree. See `scaleLoupe(by:)`.
+    @Published private(set) var loupeMagnification = AppConfig.Loupe.defaultMagnification
+    /// Magnification at the start of the current pinch.
+    private var loupeGestureBase = AppConfig.Loupe.defaultMagnification
     @Published var histogram: [Float] = []
     @Published var errorMessage: String?
     /// True when `CameraService` fell back to synthetic preview frames because no
@@ -118,6 +123,10 @@ final class CameraViewModel: ObservableObject {
     /// `UserDefaults` during `init`.
     private var isLoaded = false
 
+    /// True while `start()` is in flight, so the launch `.task` and a `.active` retry
+    /// can't configure the session twice at once.
+    private var isStarting = false
+
     /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
     /// observers don't immediately push the rounded values back over it. See
     /// `lockGrayCardWB()`.
@@ -159,7 +168,16 @@ final class CameraViewModel: ObservableObject {
         isLoaded = true
     }
 
+    /// Configures the camera and brings the session up. Safe to call again: the scene
+    /// -phase handler retries this when nothing is configured, so the launch `.task` and
+    /// the first `.active` can both land here, and a permission grant made in iOS
+    /// Settings can be picked up on return. A second call while one is in flight is a
+    /// no-op rather than a concurrent reconfiguration.
     func start() async {
+        guard !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
+
         do {
             try await camera.configure()
             isPreviewMode = camera.isPreviewMode
@@ -178,8 +196,12 @@ final class CameraViewModel: ObservableObject {
             applyExposureBias()
             // The persisted colour temperature has to reach the device too, or the
             // viewfinder opens on the camera's own guess while the panel shows the
-            // value from the last session.
+            // value from the last session. Focus likewise: a new device defaults to
+            // continuous AF, so without this the slider reads 0.5 while the lens is
+            // doing something else entirely — `resumeSession()` already pushed it, and
+            // the two startup paths disagreeing is what made it easy to miss.
             pushWhiteBalance()
+            pushFocus()
         } catch {
             report(error)
         }
@@ -218,18 +240,30 @@ final class CameraViewModel: ObservableObject {
         Task {
             do {
                 try await camera.select(lens: lens)
-                exposureLocked = false      // new module → re-set and re-lock exposure
-                nearAnchor = nil
-                farAnchor = nil
-                torchEnabled = false        // torch belongs to the previous device
-                applyExposureBias()         // metering bias is per-device
-                pushWhiteBalance()          // and so is white balance
-                // The new device defaults to continuous AF. Push the slider's value
-                // so the displayed focus actually matches the hardware; didSet won't
-                // fire because lensPosition itself hasn't changed.
+            } catch {
+                // Only the attach itself gets rolled back. The reconfiguration below can
+                // fail on its own, and rolling back then would name a lens that IS
+                // attached — leaving the button label, `currentLensName` and the next
+                // `cycleLens()` all describing the wrong module while the new one is live.
+                // Restore only if this is still the switch the UI is showing; a later tap
+                // may already have claimed a different lens.
+                if selectedLensID == id { selectedLensID = previousLensID }
+                report(error)
+                return
+            }
+
+            exposureLocked = false      // new module → re-set and re-lock exposure
+            nearAnchor = nil
+            farAnchor = nil
+            torchEnabled = false        // torch belongs to the previous device
+            applyExposureBias()         // metering bias is per-device
+            pushWhiteBalance()          // and so is white balance
+            // The new device defaults to continuous AF. Push the slider's value
+            // so the displayed focus actually matches the hardware; didSet won't
+            // fire because lensPosition itself hasn't changed.
+            do {
                 try camera.setFocus(lensPosition: lensPosition)
             } catch {
-                selectedLensID = previousLensID
                 report(error)
             }
         }
@@ -348,8 +382,23 @@ final class CameraViewModel: ObservableObject {
         preview.update { $0.loupeCenter = normalizedPoint }
     }
 
-    func setLoupeMagnification(_ m: CGFloat) {
-        preview.update { $0.loupeMagnification = m.clamped(to: AppConfig.Loupe.magnificationRange) }
+    /// Scales the loupe during a pinch, relative to where the gesture started.
+    ///
+    /// Magnification lives here rather than as `@State` in the loupe view. It used to be
+    /// stored in both places: the view's copy reset to 3× every time the loupe was hidden
+    /// and shown (SwiftUI re-initialises `@State` on a conditionally-built view) while the
+    /// processor kept the pinched value, so the label read "3.0×" over a crop rendered at
+    /// 6× and the next pinch multiplied from the wrong base. Same class of bug as a
+    /// disabled shutter whose caption says it's ready — one decision, two renderings.
+    func scaleLoupe(by factor: CGFloat) {
+        loupeMagnification = (loupeGestureBase * factor)
+            .clamped(to: AppConfig.Loupe.magnificationRange)
+        preview.update { $0.loupeMagnification = loupeMagnification }
+    }
+
+    /// Ends a pinch, so the next one starts from where this one finished.
+    func commitLoupeScale() {
+        loupeGestureBase = loupeMagnification
     }
 
     func markNear() { nearAnchor = lensPosition }
@@ -463,11 +512,18 @@ final class CameraViewModel: ObservableObject {
             // from claiming it is still on.
             if torchEnabled { torchEnabled = false }
         case .active:
-            // Only once the camera is configured — the initial .active at launch fires
-            // before configure() completes, and start() handles that case itself.
+            // Nothing configured yet. That is either the initial .active at launch,
+            // which arrives before configure() completes and which start() handles
+            // itself, or a configure() that failed — most often denied camera
+            // permission. Retrying is what makes the second case recoverable: granting
+            // access in iOS Settings and coming back used to leave the viewfinder on a
+            // spinner forever, because .task never runs again and this guard returned.
             // Preview mode has no lenses by definition, so it can't be gated on those;
             // it still needs its synthetic frame timer restarted.
-            guard !lenses.isEmpty || isPreviewMode else { return }
+            guard !lenses.isEmpty || isPreviewMode else {
+                Task { await start() }
+                return
+            }
             Task { await resumeSession() }
         default:
             break

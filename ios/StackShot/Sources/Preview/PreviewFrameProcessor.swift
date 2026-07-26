@@ -143,12 +143,19 @@ final class PreviewFrameProcessor {
                              screenPointWidth: CGFloat) -> UIImage? {
         let extent = image.extent
         let sideOnScreen = AppConfig.Loupe.diameter
-        let cropSide = sideOnScreen / magnification * (extent.width / screenPointWidth)
+        let requested = sideOnScreen / magnification * (extent.width / screenPointWidth)
+        let cropSide = min(requested, min(extent.width, extent.height))
         let cx = extent.minX + center.x * extent.width
         let cy = extent.minY + (1 - center.y) * extent.height
-        let cropRect = CGRect(x: cx - cropSide / 2, y: cy - cropSide / 2,
-                              width: cropSide, height: cropSide)
-            .intersection(extent)
+
+        // Slide the crop back inside the frame rather than intersecting it. Clipping a
+        // square against the edge yields a half-width rect, which then gets stretched
+        // into the loupe's fixed circle — so tapping near an edge showed detail squashed
+        // 2:1 while the label still claimed 3.0×, on the one control whose whole job is
+        // judging critical focus.
+        let originX = min(max(cx - cropSide / 2, extent.minX), extent.maxX - cropSide)
+        let originY = min(max(cy - cropSide / 2, extent.minY), extent.maxY - cropSide)
+        let cropRect = CGRect(x: originX, y: originY, width: cropSide, height: cropSide)
         guard !cropRect.isEmpty else { return nil }
 
         let cropped = image.cropped(to: cropRect)

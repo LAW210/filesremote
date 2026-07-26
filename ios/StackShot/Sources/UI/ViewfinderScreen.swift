@@ -78,13 +78,22 @@ struct ViewfinderScreen: View {
                        y: ((tap.y - fitted.minY) / fitted.height).clamped(to: 0...1))
     }
 
+    /// Only the bottom panel used to be gated on `.idle`, which left this whole row live
+    /// during a bracket. Switching lenses mid-sweep tears down the input the in-flight
+    /// capture depends on, and toggling the torch changes the illumination between frames
+    /// of a bracket whose entire premise is that every frame shares one exposure.
+    private var isBusy: Bool {
+        if case .idle = vm.phase { return false }
+        return true
+    }
+
     private var topBar: some View {
         HStack(spacing: 10) {
             // One button cycling the available back cameras, rather than a chip each.
             Button(vm.currentLensName) { vm.cycleLens() }
                 .buttonStyle(.bordered)
                 .tint(.yellow)
-                .disabled(vm.lenses.count < 2)
+                .disabled(vm.lenses.count < 2 || isBusy)
 
             Label(vm.exposureLocked ? "Locked" : "Live",
                   systemImage: vm.exposureLocked ? "lock.fill" : "lock.open")
@@ -109,21 +118,28 @@ struct ViewfinderScreen: View {
                 Image(systemName: vm.torchEnabled ? "bolt.fill" : "bolt.slash")
             }
             .tint(vm.torchEnabled ? .orange : .white)
+            .disabled(isBusy)
             .accessibilityLabel("Torch")
 
+            // Navigating away mid-bracket would hide the progress view and the Cancel
+            // button while the capture kept running.
             NavigationLink {
                 LibraryScreen()
             } label: {
                 Image(systemName: "photo.stack")
             }
             .tint(.white)
+            .disabled(isBusy)
 
+            // A Settings sheet still open when stacking finishes would swallow the
+            // review sheet: two presentations from one hosting controller, one wins.
             Button {
                 showSettings = true
             } label: {
                 Image(systemName: "gearshape")
             }
             .tint(.white)
+            .disabled(isBusy)
             .sheet(isPresented: $showSettings) { SettingsSheet() }
         }
     }
@@ -275,8 +291,6 @@ struct PreviewModeBadge: View {
 struct LoupeView: View {
     let image: UIImage
     @EnvironmentObject var vm: CameraViewModel
-    @State private var magnification = AppConfig.Loupe.defaultMagnification
-    @State private var gestureBase = AppConfig.Loupe.defaultMagnification
 
     /// Sits on the side opposite the sample point, so it never covers the region it's
     /// magnifying. The dodge is horizontal only: the bottom of the screen belongs to
@@ -287,7 +301,6 @@ struct LoupeView: View {
 
     var body: some View {
         let side = AppConfig.Loupe.diameter
-        let range = AppConfig.Loupe.magnificationRange
         let alignment = dodgeAlignment
         VStack(spacing: 4) {
             Image(uiImage: image)
@@ -295,17 +308,14 @@ struct LoupeView: View {
                 .frame(width: side, height: side)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(.yellow, lineWidth: 2))
-            Text(String(format: "%.1f×", magnification))
+            Text(String(format: "%.1f×", vm.loupeMagnification))
                 .font(.caption2)
                 .foregroundStyle(.yellow)
         }
         .gesture(
             MagnificationGesture()
-                .onChanged { value in
-                    magnification = (gestureBase * value).clamped(to: range)
-                    vm.setLoupeMagnification(magnification)
-                }
-                .onEnded { _ in gestureBase = magnification }
+                .onChanged { vm.scaleLoupe(by: $0) }
+                .onEnded { _ in vm.commitLoupeScale() }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .padding(.top, 60)

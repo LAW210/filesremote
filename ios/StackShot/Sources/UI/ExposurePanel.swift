@@ -14,10 +14,16 @@ struct ExposurePanel: View {
             HistogramView(bins: vm.histogram)
                 .frame(height: 40)
 
+            // Disabled while locked, because the view model refuses to push a bias to a
+            // locked device (doing so would switch metering back to continuous and undo
+            // the lock). Left enabled, the slider moved and the label changed while
+            // nothing happened — and worse, the value was not discarded: the next resume
+            // or launch pushed it, so the exposure jumped later, long after the drag.
             row(String(format: "EV %+.1f", vm.evBias)) {
                 Slider(value: $vm.evBias,
                        in: AppConfig.Exposure.evBiasRange,
                        step: AppConfig.Exposure.evBiasStep)
+                .disabled(vm.exposureLocked)
             }
 
             row("\(Int(vm.kelvin)) K") {
