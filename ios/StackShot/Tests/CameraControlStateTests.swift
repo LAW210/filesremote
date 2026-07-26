@@ -427,6 +427,58 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertNotNil(vm.errorMessage)
     }
 
+    // MARK: - Loupe magnification
+
+    /// Magnification is one stored value, mirrored into the frame processor. It used to be
+    /// duplicated as `@State` in the loupe view, which reset to 3x whenever the loupe was
+    /// hidden and shown while the processor kept the pinched value — so the label read
+    /// "3.0x" over a crop rendered at 6x.
+    func testSteppingLoupeMagnificationMovesByTheStep() {
+        let vm = makeViewModel(FakeCamera())
+        let start = vm.loupeMagnification
+
+        vm.stepLoupeMagnification(by: 0.5)
+
+        XCTAssertEqual(vm.loupeMagnification, start + 0.5)
+    }
+
+    func testLoupeMagnificationClampsToItsRange() {
+        let vm = makeViewModel(FakeCamera())
+        let range = AppConfig.Loupe.magnificationRange
+
+        for _ in 0..<40 { vm.stepLoupeMagnification(by: 0.5) }
+        XCTAssertEqual(vm.loupeMagnification, range.upperBound)
+
+        for _ in 0..<40 { vm.stepLoupeMagnification(by: -0.5) }
+        XCTAssertEqual(vm.loupeMagnification, range.lowerBound)
+    }
+
+    /// Stepping has to move the pinch base too, or a later pinch would multiply from a
+    /// magnification the loupe is no longer showing.
+    func testSteppingRebasesTheGestureSoAPinchCompoundsFromWhereItIs() {
+        let vm = makeViewModel(FakeCamera())
+        vm.stepLoupeMagnification(by: 1)          // 3 -> 4
+        let stepped = vm.loupeMagnification
+
+        vm.scaleLoupe(by: 1)                      // a pinch that changes nothing
+
+        XCTAssertEqual(vm.loupeMagnification, stepped)
+    }
+
+    /// Hiding and re-showing the loupe must not reset the zoom, which is the bug the
+    /// single stored value exists to prevent.
+    func testLoupeMagnificationSurvivesHidingAndShowing() {
+        let vm = makeViewModel(FakeCamera())
+        vm.setLoupe(visible: true)
+        vm.stepLoupeMagnification(by: 1.5)
+        let chosen = vm.loupeMagnification
+
+        vm.setLoupe(visible: false)
+        vm.setLoupe(visible: true)
+
+        XCTAssertEqual(vm.loupeMagnification, chosen)
+    }
+
     // MARK: - Startup
 
     /// Both persisted manual settings have to reach the device on launch, or the viewfinder

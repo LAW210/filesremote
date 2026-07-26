@@ -5,6 +5,7 @@ struct ViewfinderScreen: View {
     @State private var showExposurePanel = false
     @State private var showFocusPanel = true
     @State private var showSettings = false
+    @State private var confirmLensSwitch = false
 
     var body: some View {
         ZStack {
@@ -56,6 +57,22 @@ struct ViewfinderScreen: View {
             }
             .padding()
         }
+        // A tripod session is minutes of deliberately not touching the phone, so iOS
+        // auto-lock (30 s by default) fires mid-shoot. Locking backgrounds the app, which
+        // stops the session, fails the pending capture, and makes the bracket delete its
+        // own directory — the whole capture, silently. Held only while this screen is up,
+        // so the Library and Settings don't keep the display awake.
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
+        .confirmationDialog("Switch lens?",
+                            isPresented: $confirmLensSwitch,
+                            titleVisibility: .visible) {
+            Button("Switch and clear", role: .destructive) { vm.cycleLens() }
+            Button("Keep this lens", role: .cancel) {}
+        } message: {
+            Text("Near and Far are positions on this lens, so switching clears them and "
+                 + "unlocks exposure. You'll need to set them again.")
+        }
         .alert("Error", isPresented: .init(
             get: { vm.errorMessage != nil },
             set: { if !$0 { vm.errorMessage = nil } })) {
@@ -90,7 +107,15 @@ struct ViewfinderScreen: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             // One button cycling the available back cameras, rather than a chip each.
-            Button(vm.currentLensName) { vm.cycleLens() }
+            Button(vm.currentLensName) {
+                // Only asks when there is something to lose; otherwise switching is free
+                // and a dialog every time would be noise.
+                if vm.nearAnchor != nil || vm.farAnchor != nil || vm.exposureLocked {
+                    confirmLensSwitch = true
+                } else {
+                    vm.cycleLens()
+                }
+            }
                 .buttonStyle(.bordered)
                 .tint(.yellow)
                 .disabled(vm.lenses.count < 2 || isBusy)
@@ -308,15 +333,31 @@ struct LoupeView: View {
                 .frame(width: side, height: side)
                 .clipShape(Circle())
                 .overlay(Circle().stroke(.yellow, lineWidth: 2))
-            Text(String(format: "%.1f×", vm.loupeMagnification))
-                .font(.caption2)
-                .foregroundStyle(.yellow)
+            // Buttons rather than a pinch. A two-finger gesture on a phone clamped over a
+            // light box is the surest way to shift the rig, and the framing has to survive
+            // until the bracket finishes — so zoom is one small tap at a time, well inside
+            // the loupe's own footprint.
+            HStack(spacing: 10) {
+                Button { vm.stepLoupeMagnification(by: -0.5) } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                }
+                .disabled(vm.loupeMagnification <= AppConfig.Loupe.magnificationRange.lowerBound)
+                .accessibilityLabel("Reduce loupe magnification")
+
+                Text(String(format: "%.1f\u{00D7}", vm.loupeMagnification))
+                    .font(.caption2)
+                    .monospacedDigit()
+                    .foregroundStyle(.yellow)
+
+                Button { vm.stepLoupeMagnification(by: 0.5) } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                }
+                .disabled(vm.loupeMagnification >= AppConfig.Loupe.magnificationRange.upperBound)
+                .accessibilityLabel("Increase loupe magnification")
+            }
+            .font(.footnote)
+            .tint(.yellow)
         }
-        .gesture(
-            MagnificationGesture()
-                .onChanged { vm.scaleLoupe(by: $0) }
-                .onEnded { _ in vm.commitLoupeScale() }
-        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
         .padding(.top, 60)
         .padding(.leading, alignment == .topLeading ? 12 : 0)
@@ -336,8 +377,14 @@ struct CaptureProgressView: View {
                 Text("Frame \(f) / \(n)").font(.title3).monospacedDigit()
                 ProgressView(value: Double(f), total: Double(n))
             case .stacking(let p):
+                // A bare bar on a multi-minute wait reads as a hang. The percentage is
+                // what distinguishes "slow" from "stuck" while you stand over the box.
                 Text("Stacking…").font(.title3)
+                Text("\(Int(p * 100))%")
+                    .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                 ProgressView(value: p)
+                Text("Keep the app open — this can take a few minutes.")
+                    .font(.caption2).foregroundStyle(.secondary)
             default:
                 EmptyView()
             }

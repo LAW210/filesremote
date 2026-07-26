@@ -439,6 +439,16 @@ final class CameraViewModel: ObservableObject {
         loupeGestureBase = loupeMagnification
     }
 
+    /// Nudges magnification by a fixed step, for the loupe's ± buttons. Kept alongside
+    /// `scaleLoupe(by:)` rather than replacing it so the multiplicative path stays
+    /// available if a pinch is ever wanted again; both write the one stored value.
+    func stepLoupeMagnification(by delta: CGFloat) {
+        loupeMagnification = (loupeMagnification + delta)
+            .clamped(to: AppConfig.Loupe.magnificationRange)
+        loupeGestureBase = loupeMagnification
+        preview.update { $0.loupeMagnification = loupeMagnification }
+    }
+
     func markNear() { nearAnchor = lensPosition }
     func markFar() { farAnchor = lensPosition }
 
