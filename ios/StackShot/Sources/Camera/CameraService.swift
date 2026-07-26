@@ -18,8 +18,34 @@ final class CameraService: NSObject, CameraControlling {
     private let sessionQueue = DispatchQueue(label: "stackshot.session")
     private let videoQueue = DispatchQueue(label: "stackshot.video")
 
-    private var deviceLenses: [DeviceLens] = []
-    private var currentDeviceLens: DeviceLens?
+    /// Guards the two fields below, and only those.
+    ///
+    /// They are written on `sessionQueue` (`configureOnQueue`, `attach`) but read from
+    /// the main actor and from the bracket's own thread, and `DeviceLens?` is a
+    /// multi-field struct, so that read is not atomic. Every `AVCaptureDevice` stays
+    /// permanently retained by `_deviceLenses`, so the realistic worst case is a stale
+    /// read rather than an over-release — but a torn struct read is undefined anyway,
+    /// and this is far cheaper than the alternative that was considered: routing every
+    /// device call through `sessionQueue`. That self-deadlocks through the `device`
+    /// accessor (the single funnel all the control methods use), blocks cooperative-pool
+    /// threads in the settle loops, and would have to turn five load-bearing `throws`
+    /// into `async` — including the one that aborts a bracket when the lens won't move.
+    ///
+    /// `videoInput` is deliberately not guarded: it is only ever touched inside `attach`,
+    /// on `sessionQueue`, and is never read from anywhere else.
+    private let stateLock = NSLock()
+    private var _deviceLenses: [DeviceLens] = []
+    private var _currentDeviceLens: DeviceLens?
+
+    private var deviceLenses: [DeviceLens] {
+        get { stateLock.withLock { _deviceLenses } }
+        set { stateLock.withLock { _deviceLenses = newValue } }
+    }
+
+    private var currentDeviceLens: DeviceLens? {
+        get { stateLock.withLock { _currentDeviceLens } }
+        set { stateLock.withLock { _currentDeviceLens = newValue } }
+    }
 
     private var videoInput: AVCaptureDeviceInput?
     private let photoOutput = AVCapturePhotoOutput()

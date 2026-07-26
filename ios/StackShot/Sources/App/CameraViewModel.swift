@@ -524,6 +524,19 @@ final class CameraViewModel: ObservableObject {
                 Task { await start() }
                 return
             }
+            // Not while a bracket owns the device. `.active` also fires for trips that
+            // never reach `.background` — a Control Center pull, a notification banner —
+            // so nothing was stopped and there is nothing to resume, but re-applying
+            // would write to the device from the main actor while the bracket is writing
+            // to it from its own thread. That is an unbalanced `lockForConfiguration`
+            // pair, which raises an ObjC exception Swift cannot catch. It would also
+            // push the *slider's* focus position, which is stale mid-sweep, so the
+            // frame in flight would be shot at the wrong distance.
+            //
+            // A real `.background` fails the pending capture and ends the bracket, so by
+            // the time `.active` follows that path, `phase` is back to `.idle` and the
+            // resume runs normally.
+            guard phase == .idle else { return }
             Task { await resumeSession() }
         default:
             break
