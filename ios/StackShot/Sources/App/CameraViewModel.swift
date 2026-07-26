@@ -536,7 +536,9 @@ final class CameraViewModel: ObservableObject {
             // A real `.background` fails the pending capture and ends the bracket, so by
             // the time `.active` follows that path, `phase` is back to `.idle` and the
             // resume runs normally.
-            guard phase == .idle else { return }
+            // `self.` is load-bearing: the parameter is also called `phase`, and it is a
+            // ScenePhase, which has no `.idle`.
+            guard self.phase == .idle else { return }
             Task { await resumeSession() }
         default:
             break
