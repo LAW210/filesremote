@@ -22,6 +22,8 @@ final class StackFlowTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private static let lens = LensInfo(id: "back.1x", name: "1x")
+
     private func makeViewModel() -> (CameraViewModel, FakeStackPersisting, FakeCamera) {
         let camera = FakeCamera()
         let stacking = FakeStackPersisting()
@@ -29,6 +31,30 @@ final class StackFlowTests: XCTestCase {
                                  stacking: stacking,
                                  defaults: makeIsolatedDefaults())
         return (vm, stacking, camera)
+    }
+
+    /// A view model with every collaborator faked and the shutter armed: everything
+    /// `captureStack()` needs to run, and no filesystem anywhere. `FakeBracket` stands in for
+    /// the sweep, so nothing writes a StackSet directory into the host's Documents folder and
+    /// no test has to delete one afterwards.
+    private func makeArmedViewModel() -> (vm: CameraViewModel,
+                                          stacking: FakeStackPersisting,
+                                          bracket: FakeBracket,
+                                          camera: FakeCamera) {
+        let camera = FakeCamera()
+        let stacking = FakeStackPersisting()
+        let bracket = FakeBracket()
+        let vm = CameraViewModel(camera: camera,
+                                 stacking: stacking,
+                                 defaults: makeIsolatedDefaults(),
+                                 makeBracket: bracket.factory)
+        camera.lenses = [Self.lens]
+        camera.currentLens = Self.lens
+        vm.exposureLocked = true
+        vm.nearAnchor = 0.2
+        vm.farAnchor = 0.8
+        vm.stepCount = 3
+        return (vm, stacking, bracket, camera)
     }
 
     /// A StackSet with no files behind it. The fake never reads a frame, so nothing needs

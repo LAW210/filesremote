@@ -315,8 +315,13 @@ final class CameraService: NSObject, CameraControlling {
         // for — return immediately as if it had already settled.
         if isPreviewMode { return }
         guard let device else { return }
-        await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
-                              tick: SettleWait.sleepTick) { !device.isAdjustingExposure }
+        // Wrapped rather than passed as `SettleWait.sleepTick`: a function reference does not
+        // carry its default arguments, so that spelling has type `(UInt64) async -> Bool` and
+        // will not satisfy `() async -> Bool`.
+        _ = await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
+                                  tick: { await SettleWait.sleepTick() }) {
+            !device.isAdjustingExposure
+        }
     }
 
     /// Freezes exposure at the metered value. Every frame in a bracket must share one
@@ -411,7 +416,7 @@ final class CameraService: NSObject, CameraControlling {
         if isPreviewMode { return true }
         guard let device else { return false }
         return await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
-                                     tick: SettleWait.sleepTick) {
+                                     tick: { await SettleWait.sleepTick() }) {
             abs(device.lensPosition - target) <= tolerance
         }
     }
