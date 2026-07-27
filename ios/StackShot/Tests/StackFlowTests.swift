@@ -70,6 +70,17 @@ final class StackFlowTests: XCTestCase {
         }
     }
 
+    /// Runs the main-actor hops that are already enqueued, and nothing more.
+    ///
+    /// Tasks of equal priority on the main actor run in the order they were enqueued, so
+    /// awaiting one enqueued now means every hop enqueued before it has already run. That
+    /// ordering is what makes "the late tick was delivered, and then dropped" assertable:
+    /// a bounded pile of `Task.yield()`s would leave "delivered and dropped" and "never
+    /// delivered" looking identical, which is how a negative assertion becomes a free pass.
+    private func drainMainActorHops() async {
+        for _ in 0..<3 { await Task { @MainActor in }.value }
+    }
+
     private func discardCalls(_ stacking: FakeStackPersisting) -> [FakeStackPersisting.Call] {
         stacking.calls.filter { if case .discard = $0 { return true } else { return false } }
     }
@@ -127,6 +138,44 @@ final class StackFlowTests: XCTestCase {
 
         XCTAssertEqual(vm.phase, .done)
         XCTAssertFalse(vm.isStacking)
+    }
+
+    /// A progress tick delivered after the stack has finished must be dropped, not applied.
+    ///
+    /// This is the regression the `reportStackProgress` guard exists for. Ticks are emitted
+    /// from the engine's thread and delivered by a `Task { @MainActor }` hop, so a tick sent
+    /// just before the engine returned can arrive *after* `phase = .done`. Applied blindly
+    /// it reopened a finished stage: the review sheet never appeared, the progress bar sat
+    /// over a photo that was already on disk, and `isStacking` armed the "this throws away
+    /// frames" cancel confirmation — indistinguishable from a hang.
+    ///
+    /// The fake hands back the closure it was given, so the late delivery is an ordinary
+    /// call at a moment this test picks rather than a race to reproduce.
+    func testALateProgressTickIsDroppedRatherThanReopeningAFinishedStack() async throws {
+        let (vm, stacking, _) = makeViewModel()
+        vm.autoSaveToPhotos = false
+        let set = makeSet()
+
+        try await vm.stack(set: set)
+        XCTAssertEqual(vm.phase, .done)
+
+        let tick = try XCTUnwrap(stacking.progressClosure, "the view model must pass a progress closure")
+        tick(0.9)
+        await drainMainActorHops()
+
+        XCTAssertEqual(vm.phase, .done, "a tick delivered after the stack finished must be dropped")
+        XCTAssertFalse(vm.isStacking)
+        XCTAssertNotNil(vm.resultImage, "and it must not disturb the finished result")
+
+        // Proof the assertion above is not vacuous: the very same closure, awaited through
+        // the very same fence, *does* move the phase while stacking is still current. So
+        // what dropped the tick was the guard — not a tick that was never delivered, and
+        // not a fence too short to see it.
+        vm.phase = .stacking(0.1)
+        tick(0.55)
+        await drainMainActorHops()
+        XCTAssertEqual(vm.phase, .stacking(0.55),
+                       "premise: this closure and this fence do apply a tick while stacking")
     }
 
     /// `isStacking` gates the "this will throw away frames" cancel confirmation, so it must
@@ -243,6 +292,42 @@ final class StackFlowTests: XCTestCase {
         XCTAssertEqual(discardCalls(stacking), [], "the stacked set must survive a Photos failure")
     }
 
+    /// A cancel that arrives during the auto-save is too late to mean anything, and must not
+    /// be dressed up as a failure.
+    ///
+    /// By the time `saveFileToPhotos` runs, the merged image is encoded, on disk and in the
+    /// manifest — the capture succeeded in every way that matters, and only the Photos copy
+    /// was skipped. Routing that `CancellationError` through `report(error)` raised "The
+    /// operation was cancelled" as an alert over a completed capture. Note the *absence* of
+    /// a discard: this is the one place the two cancellation paths must behave differently,
+    /// so folding these two catch arms back together would delete a finished set here.
+    func testACancelDuringTheAutoSaveIsNotReportedAsAFailure() async throws {
+        let (vm, stacking, _) = makeViewModel()
+        vm.autoSaveToPhotos = true
+        let url = URL(fileURLWithPath: "/tmp/stackshot-fake/\(UUID().uuidString)/stacked.jpg")
+        stacking.mergedFileURLResult = url
+        stacking.photosError = CancellationError()
+        let set = makeSet()
+
+        try await vm.stack(set: set)
+
+        XCTAssertEqual(vm.phase, .done, "the stack is already on disk; a late cancel cannot undo it")
+        XCTAssertTrue(vm.resultImage === stacking.output.merged)
+        XCTAssertNotNil(vm.lastSet?.result)
+        XCTAssertTrue(vm.anchorsFromPreviousCapture)
+        XCTAssertFalse(vm.resultSavedToPhotos, "the Photos copy was skipped, so nothing may claim it")
+        XCTAssertNil(vm.errorMessage, "a cancel is not a failure the owner needs an alert about")
+        XCTAssertEqual(discardCalls(stacking), [],
+                       "a cancelled *save* must not discard the set the way a cancelled stack does")
+        // The save really was reached and really did throw — otherwise the arm under test
+        // was never entered.
+        XCTAssertEqual(stacking.calls, [
+            .stackAndPersist(setID: set.id, outputFormat: vm.outputFormat, deleteFramesAfter: true),
+            .mergedFileURL(setID: set.id, hasResult: true),
+            .saveFileToPhotos(url)
+        ])
+    }
+
     /// No merged file to save — the set came back without a result, so `mergedFileURL` is
     /// nil. Nothing is handed to Photos, nothing crashes on an unwrapped URL, and the stack
     /// still finishes.
@@ -297,18 +382,22 @@ final class StackFlowTests: XCTestCase {
         XCTAssertTrue(vm.isStacking)
     }
 
-    /// The other half of the failure path: `captureStack()`'s catch is what turns a thrown
-    /// stacking error into a reported message and a return to `.idle`, so the shutter comes
-    /// back instead of the UI sitting on a progress bar forever.
+    /// The other half of the failure path, plus what starting a capture must throw away.
     ///
-    /// Reaching that catch means running a real bracket, which `captureStack()` builds
-    /// itself against `StackStore.shared` — there is no seam for it. The bracket therefore
-    /// writes a set into the test host's Documents directory, so this test records what was
-    /// there beforehand and removes anything it added.
-    func testCaptureStackReportsAStackingFailureAndReturnsToIdle() async {
+    /// `captureStack()`'s catch is what turns a thrown stacking error into a reported message
+    /// and a return to `.idle`, so the shutter comes back instead of the UI sitting on a
+    /// progress bar forever. Reaching that catch means running a real bracket, which
+    /// `captureStack()` builds itself against `StackStore.shared` — there is no seam for it.
+    /// The bracket therefore writes a set into the test host's Documents directory, so this
+    /// test records what was there beforehand and removes anything it added.
+    ///
+    /// The same run covers the previous result being cleared. `lastSet` is the one that
+    /// mattered: `mergedFileURL` is derived from it, so a stale `lastSet` left the share and
+    /// save actions pointing at the *previous* capture's file while `resultImage` was already
+    /// nil — exporting the wrong photo, with nothing on screen to suggest it.
+    func testCaptureStackClearsThePreviousResultAndReportsAStackingFailure() async {
         let (vm, stacking, camera) = makeViewModel()
         vm.autoSaveToPhotos = false
-        stacking.stackError = StackFlowError(message: "Stacking engine failed: out of memory")
 
         let preexisting = Set(StackStore().loadAll().map(\.id))
         addTeardownBlock {
@@ -318,6 +407,19 @@ final class StackFlowTests: XCTestCase {
             }
         }
 
+        // A finished capture to be superseded. Nothing here touches the filesystem — the
+        // real bracket only enters below.
+        let previous = makeSet()
+        do {
+            try await vm.stack(set: previous)
+        } catch {
+            XCTFail("the first stack must succeed: \(error)")
+        }
+        XCTAssertNotNil(vm.lastSet, "premise: there is a previous result to clear")
+        XCTAssertNotNil(vm.resultImage)
+        vm.dismissReview()          // what the UI does as the review sheet goes away
+
+        stacking.stackError = StackFlowError(message: "Stacking engine failed: out of memory")
         camera.lenses = [LensInfo(id: "back.1x", name: "1x")]
         camera.currentLens = camera.lenses.first
         vm.exposureLocked = true
@@ -327,7 +429,22 @@ final class StackFlowTests: XCTestCase {
         XCTAssertTrue(vm.canCapture, "premise: the shutter must be armed")
 
         vm.captureStack()
-        // The bracket runs a start timer before its first frame, so this is a real wait.
+
+        // Synchronous, before the bracket has run a single frame: the clearing happens on
+        // the way in, so there is no window where a stale set is still readable.
+        XCTAssertNil(vm.lastSet, "a stale lastSet points share/save at the previous capture's file")
+        XCTAssertNil(vm.mergedFileURL, "which is exactly what this derived URL would expose")
+        XCTAssertNil(vm.resultImage)
+        XCTAssertNil(vm.depthMapImage)
+        XCTAssertFalse(vm.resultSavedToPhotos)
+
+        // The bracket's own progress reaches the phase: `reportBracketPhase` applies a
+        // `.countdown` over `.idle`. The start timer holds this phase for a couple of
+        // seconds, so it is not a race to observe.
+        await settle("the bracket's countdown to reach the phase", timeout: 20) {
+            vm.phase == .countdown(AppConfig.Bracket.startTimerSeconds)
+        }
+
         await settle("the stacking failure to be reported", timeout: 30) { vm.errorMessage != nil }
 
         XCTAssertEqual(vm.errorMessage, "Stacking engine failed: out of memory")
@@ -336,8 +453,25 @@ final class StackFlowTests: XCTestCase {
         XCTAssertNil(vm.lastSet)
         XCTAssertEqual(discardCalls(stacking), [],
                        "an ordinary failure must not delete the frames a retry needs")
-        XCTAssertEqual(stacking.calls.count, 1, "only stackAndPersist was attempted")
+        XCTAssertEqual(stacking.calls.count, 2, "the first stack, then the failed one — nothing else")
     }
+
+    // MARK: - Known gap: a late *bracket* tick
+
+    // `reportBracketPhase`'s drop branch — a `.countdown`/`.capturing` tick delivered once
+    // the phase has already reached `.stacking` or `.done` — is NOT covered here, and cannot
+    // honestly be with the seams that exist.
+    //
+    // Its applied branch is covered above, through the real bracket's countdown. The drop
+    // branch needs the opposite: a tick emitted before the bracket returned but delivered
+    // after `stack(set:)` set `.stacking(0)`. That closure is created inside `captureStack()`
+    // and handed to a `FocusBracketController` the view model constructs itself, so a test
+    // cannot hold it and call it late the way `FakeStackPersisting.progressClosure` allows
+    // for the stacking tick. The only other route is to race a real bracket's final
+    // `.capturing` hop against the start of stacking, which is precisely the ordering nobody
+    // controls — a test built on winning that race would pass or fail for reasons unrelated
+    // to the guard. Injecting the bracket controller (or making the guard internal) is what
+    // this would need; a test that cannot fail is worse than an admitted gap.
 
     // MARK: - Cancellation
 

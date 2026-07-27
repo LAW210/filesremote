@@ -26,6 +26,18 @@ final class CameraViewModel: ObservableObject {
     /// the only thing that reaches it.
     private var captureTask: Task<Void, Never>?
 
+    /// True once the current run has left the bracket, so a frame tick that was already in
+    /// flight when stacking began cannot reopen the capture stage.
+    ///
+    /// Tracked per run rather than derived from `phase`, which looks like it would do the
+    /// job and doesn't: when a capture starts, `phase` may still be `.done` from the
+    /// previous one — the review sheet owns the screen there, and `dismissReview()` only
+    /// happens to run first — so rejecting ticks on the strength of `phase` alone would
+    /// silently suppress the entire next bracket's countdown and frame progress. That would
+    /// be a worse bug than the one the gate exists to prevent, and it would depend on the UI
+    /// dismissing a sheet to not happen.
+    private var bracketStageOver = false
+
     // Live view
     @Published var viewfinderImage: UIImage?
     @Published var loupeImage: UIImage?
@@ -527,6 +539,7 @@ final class CameraViewModel: ObservableObject {
         // `lastSet` left the share and save actions pointing at the *previous* capture's
         // file while `resultImage` was nil — exporting the wrong photo, silently.
         lastSet = nil
+        bracketStageOver = false
 
         let controller = FocusBracketController(camera: camera)
         bracket = controller
@@ -598,16 +611,15 @@ final class CameraViewModel: ObservableObject {
     /// was applied, so a caller doesn't tick the shutter sound for a frame that is history.
     @discardableResult
     private func reportBracketPhase(_ newPhase: Phase) -> Bool {
-        switch phase {
-        case .idle, .countdown, .capturing:
-            phase = newPhase
-            return true
-        case .stacking, .done:
-            return false
-        }
+        guard !bracketStageOver else { return false }
+        phase = newPhase
+        return true
     }
 
     func stack(set: StackSet) async throws {
+        // Closes the bracket stage before the phase moves, so a frame tick still in flight
+        // is dropped rather than landing on top of `.stacking(0)`.
+        bracketStageOver = true
         phase = .stacking(0)
         let (updated, output): (StackSet, StackOutput)
         do {

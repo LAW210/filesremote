@@ -95,6 +95,18 @@ final class FakeStackPersisting: StackPersisting {
         set { withLock { _mergedFileURLResult = newValue } }
     }
 
+    private var _progressClosure: ((Double) -> Void)?
+
+    /// The `progress` closure the most recent `stackAndPersist` was handed, kept so a test
+    /// can invoke it *after* that stack has finished.
+    ///
+    /// That is the whole point: a real tick is emitted from the engine's thread and
+    /// delivered by a `Task { @MainActor }` hop whose timing nobody controls, so a tick
+    /// landing after the stack ended — the bug the view model's phase guard exists for —
+    /// can only be reproduced by racing it. Holding the closure turns that race into an
+    /// ordinary function call at the exact moment a test chooses.
+    var progressClosure: ((Double) -> Void)? { withLock { _progressClosure } }
+
     // MARK: - The mid-stack gate
 
     private var _gateEnabled = false
@@ -170,6 +182,7 @@ final class FakeStackPersisting: StackPersisting {
             _calls.append(.stackAndPersist(setID: set.id,
                                            outputFormat: outputFormat,
                                            deleteFramesAfter: deleteFramesAfter))
+            _progressClosure = progress
             return _progressValues
         }
         // Outside the lock: the view model's progress closure hops to the main actor, and
