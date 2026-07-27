@@ -22,7 +22,6 @@ final class CaptureDefaultsTests: XCTestCase {
         let loaded = CaptureDefaults.load(from: defaults)
         XCTAssertEqual(loaded.evBias, 0)
         XCTAssertEqual(loaded.kelvin, 5000)
-        XCTAssertEqual(loaded.tint, 0)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
         XCTAssertEqual(loaded.peakingEnabled, true)
         XCTAssertEqual(loaded.zebraEnabled, false)
@@ -35,7 +34,6 @@ final class CaptureDefaultsTests: XCTestCase {
         let original = CaptureDefaults(
             evBias: 2.0 / 3.0,      // must be inside evBiasRange, which is positive-only
             kelvin: 3200,
-            tint: -12,
             stepCount: 12,
             peakingEnabled: false,
             zebraEnabled: true,
@@ -48,7 +46,6 @@ final class CaptureDefaultsTests: XCTestCase {
         let loaded = CaptureDefaults.load(from: defaults)
         XCTAssertEqual(loaded.evBias, original.evBias)
         XCTAssertEqual(loaded.kelvin, original.kelvin)
-        XCTAssertEqual(loaded.tint, original.tint)
         XCTAssertEqual(loaded.stepCount, original.stepCount)
         XCTAssertEqual(loaded.peakingEnabled, original.peakingEnabled)
         XCTAssertEqual(loaded.zebraEnabled, original.zebraEnabled)
@@ -66,12 +63,10 @@ final class CaptureDefaultsTests: XCTestCase {
 
     func testOutOfRangePersistedValuesAreClampedOnLoad() {
         defaults.set(Float(-1), forKey: "capture.kelvin")
-        defaults.set(Float(9999), forKey: "capture.tint")
         defaults.set(999, forKey: "capture.stepCount")
 
         let loaded = CaptureDefaults.load(from: defaults)
         XCTAssertEqual(loaded.kelvin, AppConfig.Exposure.kelvinRange.lowerBound)
-        XCTAssertEqual(loaded.tint, AppConfig.Exposure.tintRange.upperBound)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.stepRange.upperBound)
     }
 

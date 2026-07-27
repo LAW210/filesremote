@@ -36,10 +36,6 @@ struct ExposurePanel: View {
                 Spacer()
             }
 
-            row(String(format: "Tint %+.0f", vm.tint)) {
-                Slider(value: $vm.tint, in: AppConfig.Exposure.tintRange, step: 1)
-            }
-
             Button(vm.exposureLocked ? "Unlock exposure" : "Lock exposure") {
                 vm.exposureLocked ? vm.unlockExposure() : vm.lockExposure()
             }

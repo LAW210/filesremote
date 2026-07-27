@@ -79,7 +79,7 @@ final class SessionLifecycleTests: XCTestCase {
             .setExposureBias(vm.evBias),
             .waitForExposureSettle(timeout: 1.5),
             .lockExposure,
-            .setWhiteBalance(kelvin: vm.kelvin, tint: vm.tint),
+            .setWhiteBalance(kelvin: vm.kelvin, tint: 0),
             .setFocus(lensPosition: vm.lensPosition)
         ]
     }
@@ -246,7 +246,7 @@ final class SessionLifecycleTests: XCTestCase {
         XCTAssertEqual(fake.calls, [
             .start,
             .setExposureBias(vm.evBias),
-            .setWhiteBalance(kelvin: 3200, tint: vm.tint),
+            .setWhiteBalance(kelvin: 3200, tint: 0),
             .setFocus(lensPosition: 0.62)
         ])
         // Nothing may be frozen: the meter is supposed to stay live.
@@ -416,9 +416,7 @@ final class SessionLifecycleTests: XCTestCase {
 
         XCTAssertNil(vm.errorMessage)
         XCTAssertEqual(vm.kelvin, 5000)
-        XCTAssertEqual(vm.tint, 0)
         XCTAssertTrue(AppConfig.Exposure.kelvinRange.contains(vm.kelvin))
-        XCTAssertTrue(AppConfig.Exposure.tintRange.contains(vm.tint))
         // Reflecting the measurement back into the sliders must not push it out again.
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
     }

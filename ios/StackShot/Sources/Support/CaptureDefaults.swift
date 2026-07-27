@@ -6,7 +6,6 @@ import Foundation
 struct CaptureDefaults {
     var evBias: Float
     var kelvin: Float
-    var tint: Float
     var stepCount: Int
     var peakingEnabled: Bool
     var zebraEnabled: Bool
@@ -17,7 +16,6 @@ struct CaptureDefaults {
     enum Key {
         static let evBias = "capture.evBias"
         static let kelvin = "capture.kelvin"
-        static let tint = "capture.tint"
         static let stepCount = "capture.stepCount"
         static let peakingEnabled = "capture.peakingEnabled"
         static let zebraEnabled = "capture.zebraEnabled"
@@ -30,7 +28,7 @@ struct CaptureDefaults {
     /// means a tenth setting added above is covered automatically rather than quietly
     /// leaking into whatever `UserDefaults` the tests happen to run against.
     static let allKeys = [
-        Key.evBias, Key.kelvin, Key.tint, Key.stepCount, Key.peakingEnabled,
+        Key.evBias, Key.kelvin, Key.stepCount, Key.peakingEnabled,
         Key.zebraEnabled, Key.outputFormat, Key.autoSaveToPhotos, Key.squareGuideEnabled,
     ]
 
@@ -50,13 +48,6 @@ struct CaptureDefaults {
             kelvin = stored.clamped(to: AppConfig.Exposure.kelvinRange)
         } else {
             kelvin = 5000
-        }
-
-        let tint: Float
-        if let stored = defaults.object(forKey: Key.tint) as? Float {
-            tint = stored.clamped(to: AppConfig.Exposure.tintRange)
-        } else {
-            tint = 0
         }
 
         let stepCount: Int
@@ -101,7 +92,6 @@ struct CaptureDefaults {
         return CaptureDefaults(
             evBias: evBias,
             kelvin: kelvin,
-            tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
             zebraEnabled: zebraEnabled,
@@ -115,7 +105,6 @@ struct CaptureDefaults {
     func save(to defaults: UserDefaults = .standard) {
         defaults.set(evBias, forKey: Key.evBias)
         defaults.set(kelvin, forKey: Key.kelvin)
-        defaults.set(tint, forKey: Key.tint)
         defaults.set(stepCount, forKey: Key.stepCount)
         defaults.set(peakingEnabled, forKey: Key.peakingEnabled)
         defaults.set(zebraEnabled, forKey: Key.zebraEnabled)

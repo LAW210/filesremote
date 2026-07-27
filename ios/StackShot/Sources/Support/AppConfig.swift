@@ -28,7 +28,6 @@ enum AppConfig {
         static let evBiasRange: ClosedRange<Float> = 0...3
         static let evBiasStep: Float = 1.0 / 3.0      // third-stop detents
         static let kelvinRange: ClosedRange<Float> = 2500...8000
-        static let tintRange: ClosedRange<Float> = -50...50
     }
 
     enum Stacking {

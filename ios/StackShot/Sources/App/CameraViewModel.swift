@@ -53,17 +53,11 @@ final class CameraViewModel: ObservableObject {
     /// Recorded silently — ISO and shutter are not surfaced in the UI.
     private var lockedExposure: (iso: Float, shutterSeconds: Double)?
 
-    // Both push to the device on change, like every other live control. Without this
-    // the Kelvin slider did nothing until `lockExposure()` happened to apply it — you
-    // could not see the colour you were choosing, which is the whole point of the
-    // control in a fixed light box.
+    // Pushes to the device on change, like every other live control. Without this the
+    // Kelvin slider did nothing until `lockExposure()` happened to apply it — you could
+    // not see the colour you were choosing, which is the whole point of the control in a
+    // fixed light box.
     @Published var kelvin: Float {
-        didSet {
-            pushWhiteBalance()
-            persistDefaultsIfLoaded()
-        }
-    }
-    @Published var tint: Float {
         didSet {
             pushWhiteBalance()
             persistDefaultsIfLoaded()
@@ -148,8 +142,8 @@ final class CameraViewModel: ObservableObject {
     /// be replaced.
     private var resumeTask: Task<Void, Never>?
 
-    /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
-    /// observers don't immediately push the rounded values back over it. See
+    /// Set while `kelvin` is being assigned from a device measurement, so its observer
+    /// doesn't immediately push the rounded value back over it. See
     /// `lockGrayCardWB()`.
     private var suppressWhiteBalancePush = false
 
@@ -179,7 +173,6 @@ final class CameraViewModel: ObservableObject {
         let defaults = CaptureDefaults.load()
         _evBias = Published(initialValue: defaults.evBias)
         _kelvin = Published(initialValue: defaults.kelvin)
-        _tint = Published(initialValue: defaults.tint)
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
         _zebraEnabled = Published(initialValue: defaults.zebraEnabled)
@@ -318,7 +311,10 @@ final class CameraViewModel: ObservableObject {
     /// always the value shown in the panel.
     private func pushWhiteBalance() {
         guard !suppressWhiteBalancePush else { return }
-        try? camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+        // Tint is neutral: AVFoundation's temperature-and-tint pair requires a value,
+        // but green/magenta correction was removed as a control — a fixed light box does
+        // not drift on that axis, and the gray card measures any real cast directly.
+        try? camera.setWhiteBalance(kelvin: kelvin, tint: 0)
     }
 
     /// Freezes metering and white balance so every frame in the bracket matches.
@@ -341,7 +337,7 @@ final class CameraViewModel: ObservableObject {
     private func freezeExposureAndWhiteBalance() async throws {
         await camera.waitForExposureSettle()
         lockedExposure = try camera.lockExposure()
-        try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+        try camera.setWhiteBalance(kelvin: kelvin, tint: 0)
     }
 
     /// Returns to live metering so the EV slider takes effect again.
@@ -354,7 +350,7 @@ final class CameraViewModel: ObservableObject {
     /// Locks white balance from a neutral gray/white card filling the frame.
     ///
     /// The measured gray-world gains are what the device keeps. Reflecting the equivalent
-    /// Kelvin/tint back into the sliders must therefore NOT push them out again: that
+    /// Kelvin back into the slider must therefore NOT push it out again: that
     /// would re-derive gains from numbers that have been round-tripped and clamped to the
     /// slider's range, quietly throwing away the measurement the card was held up for.
     /// A card reading outside `kelvinRange` shows the nearest value the slider can
@@ -364,7 +360,6 @@ final class CameraViewModel: ObservableObject {
             let result = try camera.lockNeutralWhiteBalance()
             withWhiteBalancePushSuppressed {
                 kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
-                tint = result.tint.clamped(to: AppConfig.Exposure.tintRange)
             }
             persistDefaults()
         } catch {
@@ -372,7 +367,7 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    /// Runs `body` with the `kelvin`/`tint` observers' device push disabled, for the one
+    /// Runs `body` with the `kelvin` observer's device push disabled, for the one
     /// case where the values are being set *from* the device rather than sent to it.
     private func withWhiteBalancePushSuppressed(_ body: () -> Void) {
         suppressWhiteBalancePush = true
@@ -386,7 +381,6 @@ final class CameraViewModel: ObservableObject {
         CaptureDefaults(
             evBias: evBias,
             kelvin: kelvin,
-            tint: tint,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
             zebraEnabled: zebraEnabled,
@@ -482,7 +476,7 @@ final class CameraViewModel: ObservableObject {
         let exposure = StackSet.Exposure(iso: settled.iso,
                                          shutterSeconds: settled.shutterSeconds,
                                          evBias: evBias)
-        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: tint)
+        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: 0)
 
         Task {
             do {
@@ -638,7 +632,7 @@ final class CameraViewModel: ObservableObject {
                 // Colour is a manual setting either way, so it has to be restored even
                 // when exposure is live — otherwise a background trip silently reverts
                 // the light box's white balance to whatever the device decides.
-                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+                try camera.setWhiteBalance(kelvin: kelvin, tint: 0)
             }
             try camera.setFocus(lensPosition: lensPosition)
         } catch {

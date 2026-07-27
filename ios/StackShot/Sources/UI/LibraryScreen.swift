@@ -68,7 +68,6 @@ struct StackSetDetail: View {
     @State private var merged: UIImage?
     @State private var depthMap: UIImage?
     @State private var showDepthMap = false
-    @State private var errorText: String?
 
     private let service = StackingService.shared
 
@@ -100,34 +99,25 @@ struct StackSetDetail: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                // File-based save/share: the exact encoded bytes, never re-compressed.
+                // Share only. A "Save to Photos" button used to sit beside this, but
+                // auto-save already puts every finished stack in the library the moment it
+                // completes, and the share sheet can save too — it was a third route to
+                // the same file, on a screen you only visit to look back at a result.
+                // Shares the file itself, so the exact encoded bytes go out uncompressed
+                // a second time.
                 if merged != nil, let url = service.mergedFileURL(for: set) {
-                    HStack(spacing: 12) {
-                        Button("Save to Photos") {
-                            Task {
-                                do { try await service.saveFileToPhotos(url) }
-                                catch { errorText = error.localizedDescription }
-                            }
-                        }
+                    ShareLink(item: url)
                         .buttonStyle(.bordered)
-
-                        ShareLink(item: url)
-                            .buttonStyle(.bordered)
-                    }
                 }
 
                 // Diagnostic, not a primary action: kept visually secondary to the
-                // Save/Share row above, and only offered when a log actually exists.
+                // share button above, and only offered when a log actually exists.
                 if let logURL = service.captureLogURL(for: set) {
                     ShareLink(item: logURL) {
                         Label("Capture log", systemImage: "doc.text")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                }
-
-                if let errorText {
-                    Text(errorText).font(.caption).foregroundStyle(.red)
                 }
             }
             .padding()
