@@ -230,7 +230,7 @@ final class CameraService: NSObject, CameraControlling {
 
     /// Simulator-only scaffolding: emits the synthetic frame on `videoQueue` at ~15 fps,
     /// through the same `onPreviewFrame` closure the real capture delegate uses, so the
-    /// rest of the pipeline (peaking, zebra, histogram, loupe) can't tell the difference.
+    /// rest of the pipeline (peaking, zebra, loupe) can't tell the difference.
     private func startPreviewTimer() {
         // start() is called both at launch and on every return to .active, and a
         // .active → .inactive → .active trip (Control Center, App Switcher) never
@@ -472,11 +472,11 @@ final class CameraService: NSObject, CameraControlling {
     /// Simulator-only scaffolding: builds one static synthetic frame for preview mode.
     /// Drawn once in `kCVPixelFormatType_32BGRA` — the exact format the real video
     /// output is configured for above — because `PreviewFrameProcessor` reads BGRA
-    /// bytes directly for its histogram; any other format would read as garbage.
+    /// bytes directly; any other format would read as garbage.
     /// The content exercises the overlays the way a real light-boxed subject would:
-    /// a bright near-white background pegs the histogram at the highlight end, a dark
-    /// ringed subject with hard edges gives focus peaking real edges to find, and a
-    /// small pure-white patch gives the zebra overlay a clipped highlight to paint.
+    /// a dark ringed subject with hard edges gives focus peaking real edges to find, and
+    /// a small pure-white patch gives the zebra overlay a clipped highlight to paint,
+    /// against a bright near-white background standing in for the backdrop.
     /// Never called on a device with a camera.
     private static func makeSyntheticPreviewBuffer() -> CVPixelBuffer? {
         let width = 1280

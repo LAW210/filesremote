@@ -70,8 +70,12 @@ struct ViewfinderScreen: View {
             Button("Switch and clear", role: .destructive) { vm.cycleLens() }
             Button("Keep this lens", role: .cancel) {}
         } message: {
-            Text("Near and Far are positions on this lens, so switching clears them and "
-                 + "unlocks exposure. You'll need to set them again.")
+            // Names everything that goes, not just the anchors. Exposure, colour and focus
+            // are all per-device, so a switch discards the neutral measurement too — the
+            // one step here that needs the reel out of the frame to redo. Leaving it out
+            // meant agreeing to lose something the dialog never mentioned.
+            Text("Near, Far, the exposure lock and the neutral measurement all belong to "
+                 + "this lens, so switching clears them. You'll need to set them again.")
         }
         .alert("Error", isPresented: .init(
             get: { vm.errorMessage != nil },
@@ -109,8 +113,12 @@ struct ViewfinderScreen: View {
             // One button cycling the available back cameras, rather than a chip each.
             Button(vm.currentLensName) {
                 // Only asks when there is something to lose; otherwise switching is free
-                // and a dialog every time would be noise.
-                if vm.nearAnchor != nil || vm.farAnchor != nil || vm.exposureLocked {
+                // and a dialog every time would be noise. A neutral measurement counts as
+                // something to lose in its own right: it is discarded on a switch, and it
+                // is taken before the exposure lock, so gating on the lock alone let the
+                // one step that needs an empty frame be thrown away without a word.
+                if vm.nearAnchor != nil || vm.farAnchor != nil
+                    || vm.exposureLocked || vm.neutralMeasured {
                     confirmLensSwitch = true
                 } else {
                     vm.cycleLens()

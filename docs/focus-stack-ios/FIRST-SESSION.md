@@ -56,7 +56,8 @@ white balance step meaningless.
 
 The app auto-selects the **closest-focusing** back camera at launch, which on modern
 iPhones is the ultra-wide (it's the macro lens). The lens button top-left cycles them —
-once anchors are set or exposure is locked it asks first, because switching clears both.
+once there is anything to lose it asks first, because a switch clears the anchors, the
+exposure lock and the neutral measurement — all three are per-device.
 
 **Do:** frame the reel to fill the frame. Turn on **1:1 crop guide** in Settings if you're
 shooting for eBay thumbnails, and frame inside the bright square.
@@ -76,34 +77,46 @@ three it is and which lens was selected — those distinguish the causes.
 
 ---
 
-## 2. Exposure — one number, then lock
+## 2. Colour, then brightness, then lock — in that order
 
 Tap **Exposure** on the panel-swap button.
 
+The panel is a numbered 1-2-3 sequence and the numbers are the order. It is not
+cosmetic: doing colour after brightness ruins the colour measurement *silently*, so the
+panel marks each step done as you go and cautions if you get ahead of it. Follow the
+numbers and this section is just their long form.
+
 **Do:**
-1. Raise **EV** until the reel itself looks right. It's positive-only by design: a light
-   box is mostly white field, the meter reads that as overexposure, and the correction is
-   always upward. Somewhere in the +0.7 to +2.0 range is the likely landing zone. Write
-   down what you end on. Note that EV is brightness only — it cannot correct a colour
-   cast, which is what step 3 is for.
-2. Turn on **zebra** (the ⚠ icon, top right). Red areas are blown and unrecoverable in an
-   edit. Chrome and polished nickel clip readily.
-3. **Set white balance now, before the final EV.** Order matters here and it is the one
-   place these two steps interfere. Take the reel out, or swing the phone so the empty
-   backdrop fills the frame, and check **zebra shows no red at all** — a clipped white
-   reads as maximum in every channel, which destroys the colour information the
-   measurement needs. Then tap **Measure neutral**.
+1. Turn on **zebra** (the ⚠ icon, top right). Red areas are blown and unrecoverable in an
+   edit. Chrome and polished nickel clip readily. Leave it on for the whole session.
+2. **① Measure neutral — first, with EV still at 0 and the reel out of the frame.** Swing
+   the phone or lift the reel out so the empty backdrop fills the frame, and check **zebra
+   shows no red at all**. A clipped white reads as maximum in every channel, so there is no
+   colour left in it to measure — and raising EV for the reel is exactly what clips it,
+   which is the whole reason this comes first. Then tap **Measure neutral**. The step's
+   marker fills in and the button changes to "Measure again".
 
    You do not need a gray card. The measurement makes the scene average neutral, and a
    light box's white backdrop *is* neutral — white is simply bright neutral. A card is
    only safer because 18% grey cannot clip. If your backdrop is a warm cream rather than
-   a true white, use a card or set Kelvin by eye instead.
-4. Put the reel back and set the **final EV** for the reel itself. Back it down until the
-   zebra is off the parts of the reel you care about — a blown backdrop is fine at *this*
-   point, which is exactly why the colour measurement had to come first.
-5. Tap **Lock exposure**. The chip at the top should switch from orange `Exposure live` to
-   green `Exposure locked`. Expect up to about a second and a half: the app waits for
-   metering to stop hunting before it freezes anything.
+   a true white, use a card or set Kelvin by eye with the slider instead.
+3. **② Put the reel back and raise EV** until the reel itself looks right. It's
+   positive-only by design: a light box is mostly white field, the meter reads that as
+   overexposure, and the correction is always upward. Somewhere in the +0.7 to +2.0 range
+   is the likely landing zone. Write down what you end on. Back it down until the zebra is
+   off the parts of the reel you care about — a blown *backdrop* is fine now, and that it
+   is fine now is exactly why ① could not wait until after this. EV is brightness only; it
+   cannot correct a colour cast, so it is no substitute for ①.
+4. **③ Tap Lock exposure.** The chip at the top should switch from orange `Exposure live`
+   to green `Exposure locked`. Expect up to about a second and a half: the app waits for
+   metering to stop hunting before it freezes anything. The EV slider goes inert once
+   locked, on purpose — pushing a bias to a locked device would switch metering back to
+   continuous and undo the lock.
+
+If you see an **orange caution** beneath ② saying EV is raised but neutral was never
+measured, you have done this out of order: drop EV to 0, take the reel out, measure, then
+bring EV back. That is the one out-of-order case the panel warns about, because it is the
+one that fails without looking like a failure.
 
 **Check:**
 - Does the preview visibly change as you move the EV slider? If not, `setExposureBias` is
