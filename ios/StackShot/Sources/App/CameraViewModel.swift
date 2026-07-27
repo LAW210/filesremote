@@ -20,7 +20,12 @@ final class CameraViewModel: ObservableObject {
     /// and the stacker are: tests used to scrub nine `capture.*` keys out of the real user
     /// store and put them back, which once shipped as a bug that wiped them for good.
     private let defaults: UserDefaults
-    private var bracket: FocusBracketController?
+    /// Builds the bracket for a capture. Injected rather than constructed inline so
+    /// `captureStack()` can be driven without a real sweep writing real StackSet
+    /// directories into the host's Documents folder — and so a progress tick can be held
+    /// and delivered late, which is the only way to exercise the gate that drops one.
+    private let makeBracket: (CameraControlling) -> BracketRunning
+    private var bracket: BracketRunning?
     /// The bracket-then-stack run, kept so it can be cancelled. The bracket has its own
     /// `cancel()`, but stacking is a compute loop with no controller — the task handle is
     /// the only thing that reaches it.
@@ -220,7 +225,11 @@ final class CameraViewModel: ObservableObject {
     /// defaults keep production call sites (`StackShotApp`) writing `CameraViewModel()`.
     init(camera: CameraControlling = CameraService(),
          stacking: StackPersisting = StackingService.shared,
-         defaults: UserDefaults = .standard) {
+         defaults: UserDefaults = .standard,
+         makeBracket: @escaping (CameraControlling) -> BracketRunning = {
+             FocusBracketController(camera: $0)
+         }) {
+        self.makeBracket = makeBracket
         self.camera = camera
         self.stacking = stacking
         self.defaults = defaults
@@ -553,7 +562,7 @@ final class CameraViewModel: ObservableObject {
         // moment later, which is a harmless no-op.
         phase = .countdown(AppConfig.Bracket.startTimerSeconds)
 
-        let controller = FocusBracketController(camera: camera)
+        let controller = makeBracket(camera)
         bracket = controller
         let plan = FocusBracketController.Plan(near: near, far: far, stepCount: stepCount)
         let settled = lockedExposure ?? camera.currentExposure ?? (iso: 0, shutterSeconds: 0)

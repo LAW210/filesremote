@@ -315,17 +315,8 @@ final class CameraService: NSObject, CameraControlling {
         // for — return immediately as if it had already settled.
         if isPreviewMode { return }
         guard let device else { return }
-        let deadline = Date().addingTimeInterval(timeout)
-        var stableTicks = 0
-        while Date() < deadline {
-            if !device.isAdjustingExposure {
-                stableTicks += 1
-                if stableTicks >= 3 { return }      // ~90 ms of stability
-            } else {
-                stableTicks = 0
-            }
-            guard await pollInterval() else { return }
-        }
+        await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
+                              tick: SettleWait.sleepTick) { !device.isAdjustingExposure }
     }
 
     /// Freezes exposure at the metered value. Every frame in a bracket must share one
@@ -419,31 +410,10 @@ final class CameraService: NSObject, CameraControlling {
         // immediate clean settle so callers proceed as they would on a real device.
         if isPreviewMode { return true }
         guard let device else { return false }
-        let deadline = Date().addingTimeInterval(timeout)
-        var stableTicks = 0
-        while Date() < deadline {
-            if abs(device.lensPosition - target) <= tolerance {
-                stableTicks += 1
-                if stableTicks >= 3 { return true }   // ~90 ms of stability
-            } else {
-                stableTicks = 0
-            }
-            guard await pollInterval() else { return false }
+        return await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
+                                     tick: SettleWait.sleepTick) {
+            abs(device.lensPosition - target) <= tolerance
         }
-        return false
-    }
-
-    /// One polling tick for the settle loops. Returns false when the wait should stop.
-    ///
-    /// The tick has to be able to say "stop", because `Task.sleep` throws *immediately* on a
-    /// cancelled task. Swallowing that with `try?` — which is what both loops used to do —
-    /// left the `while Date() < deadline` condition as the only brake, so a cancelled settle
-    /// stopped sleeping and spun as fast as it could read a device property for the rest of
-    /// its 1.5 s budget. Cancelling a bracket is exactly when that happens, on a phone
-    /// sealed in a light box with nowhere to dump the heat, and it also logged the frame as
-    /// `settle=timeout` when the truth was `cancelled`.
-    private func pollInterval() async -> Bool {
-        (try? await Task.sleep(nanoseconds: 30_000_000)) != nil
     }
 
     // MARK: - Capture
