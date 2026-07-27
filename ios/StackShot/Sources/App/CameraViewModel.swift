@@ -166,6 +166,16 @@ final class CameraViewModel: ObservableObject {
     /// found, instead of quietly resetting that axis to neutral.
     private var measuredTint: Float = 0
 
+    /// True when the current anchors were carried over from a completed capture rather
+    /// than set for what is in front of the camera now.
+    ///
+    /// Anchors deliberately survive a capture, so re-shooting the same reel at a different
+    /// frame count is one tap. The hazard is the other case: swap the reel and the shutter
+    /// is still armed with the previous product's focus planes, which would stack the
+    /// wrong distances and look like the sweep misbehaving. Cleared the moment either
+    /// anchor is set again.
+    @Published private(set) var anchorsFromPreviousCapture = false
+
     /// Label for the lens button — the lens currently attached.
     var currentLensName: String {
         lenses.first { $0.id == selectedLensID }?.name ?? "—"
@@ -192,12 +202,14 @@ final class CameraViewModel: ObservableObject {
         let defaults = CaptureDefaults.load()
         _evBias = Published(initialValue: defaults.evBias)
         _kelvin = Published(initialValue: defaults.kelvin)
+        _neutralMeasured = Published(initialValue: defaults.neutralMeasured)
         _stepCount = Published(initialValue: defaults.stepCount)
         _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
         _zebraEnabled = Published(initialValue: defaults.zebraEnabled)
         _outputFormat = Published(initialValue: defaults.outputFormat)
         _autoSaveToPhotos = Published(initialValue: defaults.autoSaveToPhotos)
         _squareGuideEnabled = Published(initialValue: defaults.squareGuideEnabled)
+        measuredTint = defaults.measuredTint
         isLoaded = true
     }
 
@@ -306,6 +318,7 @@ final class CameraViewModel: ObservableObject {
             torchEnabled = false        // torch belongs to the previous device
             measuredTint = 0            // and so does a neutral measurement
             neutralMeasured = false
+            persistDefaults()           // or a relaunch would restore the stale one
             applyExposureBias()         // metering bias is per-device
             pushWhiteBalance()          // and so is white balance
             // The new device defaults to continuous AF. Push the slider's value
@@ -401,6 +414,8 @@ final class CameraViewModel: ObservableObject {
         CaptureDefaults(
             evBias: evBias,
             kelvin: kelvin,
+            measuredTint: measuredTint,
+            neutralMeasured: neutralMeasured,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
             zebraEnabled: zebraEnabled,
@@ -461,8 +476,15 @@ final class CameraViewModel: ObservableObject {
         preview.update { $0.loupeMagnification = loupeMagnification }
     }
 
-    func markNear() { nearAnchor = lensPosition }
-    func markFar() { farAnchor = lensPosition }
+    func markNear() {
+        nearAnchor = lensPosition
+        anchorsFromPreviousCapture = false
+    }
+
+    func markFar() {
+        farAnchor = lensPosition
+        anchorsFromPreviousCapture = false
+    }
 
     // MARK: - Torch
 
@@ -545,6 +567,10 @@ final class CameraViewModel: ObservableObject {
                 report(error)    // stacking still succeeded; only the Photos add failed
             }
         }
+        // The anchors stay, so the same reel can be re-shot at a different frame count —
+        // but they are now a carry-over, and the focus panel says so, because the next
+        // subject may not be the one they were set on.
+        anchorsFromPreviousCapture = true
         phase = .done
         playCompletionSound()
     }

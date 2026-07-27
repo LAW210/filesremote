@@ -493,6 +493,30 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertNotNil(vm.errorMessage)
     }
 
+    // MARK: - Carried-over anchors
+
+    /// Anchors survive a capture so the same reel can be re-shot, but they are the
+    /// previous subject's positions until re-set — and a swapped reel shot on stale
+    /// anchors would look like the focus sweep misbehaving.
+    func testMarkingAnAnchorClearsTheCarriedOverFlag() {
+        let vm = makeViewModel(FakeCamera())
+        vm.nearAnchor = 0.2
+        vm.farAnchor = 0.8
+
+        vm.markNear()
+
+        XCTAssertFalse(vm.anchorsFromPreviousCapture)
+    }
+
+    func testMarkingFarAlsoClearsTheCarriedOverFlag() {
+        let vm = makeViewModel(FakeCamera())
+
+        vm.markFar()
+
+        XCTAssertFalse(vm.anchorsFromPreviousCapture)
+        XCTAssertEqual(vm.farAnchor, vm.lensPosition)
+    }
+
     // MARK: - Loupe magnification
 
     /// Magnification is one stored value, mirrored into the frame processor. It used to be

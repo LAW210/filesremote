@@ -22,6 +22,8 @@ final class CaptureDefaultsTests: XCTestCase {
         let loaded = CaptureDefaults.load(from: defaults)
         XCTAssertEqual(loaded.evBias, 0)
         XCTAssertEqual(loaded.kelvin, 5000)
+        XCTAssertEqual(loaded.measuredTint, 0)
+        XCTAssertEqual(loaded.neutralMeasured, false)
         XCTAssertEqual(loaded.stepCount, AppConfig.Bracket.defaultStepCount)
         XCTAssertEqual(loaded.peakingEnabled, true)
         XCTAssertEqual(loaded.zebraEnabled, false)
@@ -34,6 +36,8 @@ final class CaptureDefaultsTests: XCTestCase {
         let original = CaptureDefaults(
             evBias: 2.0 / 3.0,      // must be inside evBiasRange, which is positive-only
             kelvin: 3200,
+            measuredTint: 6,
+            neutralMeasured: true,
             stepCount: 12,
             peakingEnabled: false,
             zebraEnabled: true,
@@ -46,6 +50,8 @@ final class CaptureDefaultsTests: XCTestCase {
         let loaded = CaptureDefaults.load(from: defaults)
         XCTAssertEqual(loaded.evBias, original.evBias)
         XCTAssertEqual(loaded.kelvin, original.kelvin)
+        XCTAssertEqual(loaded.measuredTint, original.measuredTint)
+        XCTAssertEqual(loaded.neutralMeasured, original.neutralMeasured)
         XCTAssertEqual(loaded.stepCount, original.stepCount)
         XCTAssertEqual(loaded.peakingEnabled, original.peakingEnabled)
         XCTAssertEqual(loaded.zebraEnabled, original.zebraEnabled)

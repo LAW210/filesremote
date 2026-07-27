@@ -6,6 +6,12 @@ import Foundation
 struct CaptureDefaults {
     var evBias: Float
     var kelvin: Float
+    /// The green/magenta component of the last neutral measurement, and whether one was
+    /// taken. Persisted alongside Kelvin: a measurement of a fixed light box is as valid
+    /// tomorrow as the Kelvin value derived from it, and dropping only half of it on
+    /// relaunch would silently reinstate a cast the measurement had removed.
+    var measuredTint: Float
+    var neutralMeasured: Bool
     var stepCount: Int
     var peakingEnabled: Bool
     var zebraEnabled: Bool
@@ -16,6 +22,8 @@ struct CaptureDefaults {
     enum Key {
         static let evBias = "capture.evBias"
         static let kelvin = "capture.kelvin"
+        static let measuredTint = "capture.measuredTint"
+        static let neutralMeasured = "capture.neutralMeasured"
         static let stepCount = "capture.stepCount"
         static let peakingEnabled = "capture.peakingEnabled"
         static let zebraEnabled = "capture.zebraEnabled"
@@ -28,7 +36,8 @@ struct CaptureDefaults {
     /// means a tenth setting added above is covered automatically rather than quietly
     /// leaking into whatever `UserDefaults` the tests happen to run against.
     static let allKeys = [
-        Key.evBias, Key.kelvin, Key.stepCount, Key.peakingEnabled,
+        Key.evBias, Key.kelvin, Key.measuredTint, Key.neutralMeasured,
+        Key.stepCount, Key.peakingEnabled,
         Key.zebraEnabled, Key.outputFormat, Key.autoSaveToPhotos, Key.squareGuideEnabled,
     ]
 
@@ -49,6 +58,11 @@ struct CaptureDefaults {
         } else {
             kelvin = 5000
         }
+
+        // Not range-clamped: this is a device measurement, not a control, and the valid
+        // span is AVFoundation's rather than any UI's.
+        let measuredTint = (defaults.object(forKey: Key.measuredTint) as? Float) ?? 0
+        let neutralMeasured = (defaults.object(forKey: Key.neutralMeasured) as? Bool) ?? false
 
         let stepCount: Int
         if let stored = defaults.object(forKey: Key.stepCount) as? Int {
@@ -92,6 +106,8 @@ struct CaptureDefaults {
         return CaptureDefaults(
             evBias: evBias,
             kelvin: kelvin,
+            measuredTint: measuredTint,
+            neutralMeasured: neutralMeasured,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
             zebraEnabled: zebraEnabled,
@@ -105,6 +121,8 @@ struct CaptureDefaults {
     func save(to defaults: UserDefaults = .standard) {
         defaults.set(evBias, forKey: Key.evBias)
         defaults.set(kelvin, forKey: Key.kelvin)
+        defaults.set(measuredTint, forKey: Key.measuredTint)
+        defaults.set(neutralMeasured, forKey: Key.neutralMeasured)
         defaults.set(stepCount, forKey: Key.stepCount)
         defaults.set(peakingEnabled, forKey: Key.peakingEnabled)
         defaults.set(zebraEnabled, forKey: Key.zebraEnabled)
