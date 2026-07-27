@@ -4,7 +4,7 @@ import CoreVideo
 import UIKit
 
 /// Turns camera preview frames into everything the live UI needs: a viewfinder image
-/// with the focus-peaking overlay, the magnified loupe crop, and a luminance histogram.
+/// with the focus-peaking overlay, and the magnified loupe crop.
 ///
 /// Runs on the camera's video queue; settings are written from the main thread, so all
 /// mutable state lives behind a lock and `process` works on an immutable snapshot.
@@ -36,9 +36,6 @@ final class PreviewFrameProcessor {
     struct Output {
         let viewfinder: UIImage
         let loupe: UIImage?
-        /// 64-bin luminance histogram, normalized to 0–1, for the exposure panel.
-        /// Blown highlights are shown positionally by the zebra overlay, not counted.
-        let histogram: [Float]
     }
 
     private let lock = NSLock()
@@ -89,8 +86,7 @@ final class PreviewFrameProcessor {
                                 magnification: snapshot.loupeMagnification,
                                 screenPointWidth: snapshot.screenPointWidth)
         }
-        return Output(viewfinder: viewfinder, loupe: loupe,
-                      histogram: luminanceHistogram(of: pixelBuffer))
+        return Output(viewfinder: viewfinder, loupe: loupe)
     }
 
     // MARK: - Stages
@@ -161,36 +157,5 @@ final class PreviewFrameProcessor {
         let cropped = image.cropped(to: cropRect)
         guard let cg = context.createCGImage(cropped, from: cropRect) else { return nil }
         return UIImage(cgImage: cg)
-    }
-
-    /// Cheap CPU histogram from a strided sample of the BGRA buffer (~16k samples/frame).
-    private func luminanceHistogram(of pixelBuffer: CVPixelBuffer, bins: Int = 64) -> [Float] {
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
-            return [Float](repeating: 0, count: bins)
-        }
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let stride = max(1, width / 128)
-
-        var counts = [Float](repeating: 0, count: bins)
-        var row = 0
-        while row < height {
-            let rowPtr = base.advanced(by: row * rowBytes).assumingMemoryBound(to: UInt8.self)
-            var col = 0
-            while col < width {
-                let p = col * 4                      // BGRA
-                let luma = 0.114 * Float(rowPtr[p]) + 0.587 * Float(rowPtr[p + 1])
-                         + 0.299 * Float(rowPtr[p + 2])
-                let bin = min(bins - 1, Int(luma) * bins / 256)
-                counts[bin] += 1
-                col += stride
-            }
-            row += stride
-        }
-        guard let peak = counts.max(), peak > 0 else { return counts }
-        return counts.map { $0 / peak }
     }
 }

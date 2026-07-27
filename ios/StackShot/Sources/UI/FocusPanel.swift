@@ -31,12 +31,12 @@ struct FocusPanel: View {
             }
 
             HStack {
-                Text(String(format: "lens %.3f", vm.lensPosition))
-                    .font(.caption).monospacedDigit()
                 Spacer()
                 Toggle(isOn: .init(get: { vm.loupeVisible },
                                    set: { vm.setLoupe(visible: $0) })) {
-                    Label("3× loupe", systemImage: "magnifyingglass.circle")
+                    // Not "3x loupe": magnification is adjustable from the loupe itself,
+                    // so a fixed number in the label goes stale the moment it is changed.
+                    Label("Loupe", systemImage: "magnifyingglass.circle")
                         .font(.caption)
                 }
                 .toggleStyle(.button)

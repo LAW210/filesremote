@@ -31,7 +31,6 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var loupeMagnification = AppConfig.Loupe.defaultMagnification
     /// Magnification at the start of the current pinch.
     private var loupeGestureBase = AppConfig.Loupe.defaultMagnification
-    @Published var histogram: [Float] = []
     @Published var errorMessage: String?
     /// True when `CameraService` fell back to synthetic preview frames because no
     /// physical camera was found (the Simulator). Read by the UI layer to draw a
@@ -55,9 +54,9 @@ final class CameraViewModel: ObservableObject {
     private var lockedExposure: (iso: Float, shutterSeconds: Double)?
 
     // Both push to the device on change, like every other live control. Without this
-    // the Kelvin slider and its presets did nothing until `lockExposure()` happened to
-    // apply them — you could not see the colour you were choosing, which is the whole
-    // point of the control in a fixed light box.
+    // the Kelvin slider did nothing until `lockExposure()` happened to apply it — you
+    // could not see the colour you were choosing, which is the whole point of the
+    // control in a fixed light box.
     @Published var kelvin: Float {
         didSet {
             pushWhiteBalance()
@@ -210,7 +209,6 @@ final class CameraViewModel: ObservableObject {
                 Task { @MainActor in
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
-                    self.histogram = output.histogram
                 }
             }
             syncPreviewSettings()

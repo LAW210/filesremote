@@ -29,9 +29,6 @@ enum AppConfig {
         static let evBiasStep: Float = 1.0 / 3.0      // third-stop detents
         static let kelvinRange: ClosedRange<Float> = 2500...8000
         static let tintRange: ClosedRange<Float> = -50...50
-        static let whiteBalancePresets: [(name: String, kelvin: Float)] = [
-            ("Tungsten", 3200), ("LED", 5000), ("Daylight", 5600),
-        ]
     }
 
     enum Stacking {
