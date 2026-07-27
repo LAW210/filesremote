@@ -6,11 +6,24 @@ on:
   push:
     paths:
       - "ios/**"
+      # Documentation under ios/ cannot change what compiles. A README-only commit
+      # used to spend a full macOS build-and-test, which is billed at ten times a
+      # Linux minute. Negations are evaluated in order, so this must follow "ios/**".
+      - "!ios/**/*.md"
       - ".github/workflows/ios-tests.yml"
   pull_request:
     paths:
       - "ios/**"
+      - "!ios/**/*.md"
       - ".github/workflows/ios-tests.yml"
+
+# Only the newest commit on a ref is worth building. Without this, pushing three
+# fixes in five minutes ran three full macOS jobs to completion and paid for all
+# three, when only the last one's result could still matter. Superseded runs are
+# now cancelled the moment they are superseded.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-test:

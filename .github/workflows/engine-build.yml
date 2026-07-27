@@ -5,28 +5,29 @@
 # docs-only and workflow-only commits skip it.
 name: engine build
 
+# MANUAL ONLY, deliberately — this is the repository's most expensive job by a wide
+# margin: it vendors OpenCV and compiles ~30 C++ translation units on a macOS runner,
+# which bills at ten times a Linux minute.
+#
+# What it guards is not currently shipping. `ENGINE_EMBEDDED` is commented out in
+# project.yml, so the app builds the Swift fallback stacker and this job compile-checks
+# a path the app does not include. Running it automatically on every source change —
+# which is what it did until CI budget became the binding constraint — spent the most
+# money on the least active code.
+#
+# Run it by hand before enabling the engine, and after any change to the bridge or the
+# vendored sources:
+#     gh workflow run "engine build"        (or the Run workflow button in Actions)
+#
+# To restore automatic runs, put back the `push:`/`pull_request:` triggers with paths
+# ios/StackShot/{Bridge,Sources}/**, project-engine.yml and scripts/fetch_engine.sh.
+# That is the right setting once the engine is switched on and the budget allows.
 on:
-  push:
-    paths:
-      - "ios/StackShot/Bridge/**"
-      # The engine target compiles the whole app's Swift sources, not just the
-      # stacking ones, so a change anywhere under Sources/ can break this build.
-      # Narrower filters left the engine check silently stale on push (it is still
-      # caught on pull_request, which diffs the entire branch) and needed a manual
-      # workflow_dispatch to clear. This job is expensive, but "expensive" is a
-      # poor trade against "green because it never ran".
-      - "ios/StackShot/Sources/**"
-      - "ios/StackShot/project-engine.yml"
-      - "ios/StackShot/scripts/fetch_engine.sh"
-      - ".github/workflows/engine-build.yml"
-  pull_request:
-    paths:
-      - "ios/StackShot/Bridge/**"
-      - "ios/StackShot/Sources/**"
-      - "ios/StackShot/project-engine.yml"
-      - "ios/StackShot/scripts/fetch_engine.sh"
-      - ".github/workflows/engine-build.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-engine:
