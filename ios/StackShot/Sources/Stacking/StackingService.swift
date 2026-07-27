@@ -149,6 +149,11 @@ final class StackingService {
         }
     }
 
+    /// Deletes the set's whole folder — frames, manifest, log and any merged result.
+    func discard(_ set: StackSet) {
+        store.delete(set)
+    }
+
     /// Loads a previously merged result from disk, if the set has one.
     func mergedImage(for set: StackSet) -> UIImage? {
         guard let result = set.result else { return nil }

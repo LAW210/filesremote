@@ -10,9 +10,10 @@ final class CameraControlStateTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Each call gets a defaults store of its own, so nothing here touches the settings of
+    /// whatever app hosts the test bundle.
     private func makeViewModel(_ camera: FakeCamera) -> CameraViewModel {
-        isolatePersistedCaptureDefaults()
-        return CameraViewModel(camera: camera)
+        CameraViewModel(camera: camera, defaults: makeIsolatedDefaults())
     }
 
     /// Waits for `condition`, which is how the results of `selectLens()` and
@@ -574,16 +575,17 @@ final class CameraControlStateTests: XCTestCase {
     /// Both persisted manual settings have to reach the device on launch, or the viewfinder
     /// opens on the camera's own guess while the panel shows last session's numbers.
     func testStartPushesThePersistedExposureBiasAndWhiteBalance() async {
-        // Registers its own snapshot/restore teardown, so the keys written below are
-        // undone with everything else.
-        isolatePersistedCaptureDefaults()
-        UserDefaults.standard.set(Float(1.5), forKey: "capture.evBias")
-        UserDefaults.standard.set(Float(3200), forKey: "capture.kelvin")
+        // Seeded in this test's own store, which is discarded at teardown. Written through
+        // the `Key` constants `CaptureDefaults.load` reads, so a renamed key cannot leave
+        // this test silently seeding nothing.
+        let defaults = makeIsolatedDefaults()
+        defaults.set(Float(1.5), forKey: CaptureDefaults.Key.evBias)
+        defaults.set(Float(3200), forKey: CaptureDefaults.Key.kelvin)
 
         let fake = FakeCamera()
         fake.lenses = threeLenses()
         fake.currentLens = fake.lenses.first
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: defaults)
 
         await vm.start()
 

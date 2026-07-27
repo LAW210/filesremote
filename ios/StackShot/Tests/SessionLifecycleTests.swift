@@ -22,11 +22,10 @@ final class SessionLifecycleTests: XCTestCase {
     /// assignment rather than by `start()` so these tests never depend on `UIScreen`,
     /// which `start()` reads via `syncPreviewSettings()`.
     private func makeConfiguredViewModel() -> (CameraViewModel, FakeCamera) {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.lenses = [Self.backLens]
         fake.currentLens = Self.backLens
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
         vm.lenses = fake.lenses
         vm.selectedLensID = Self.backLens.id
         return (vm, fake)
@@ -141,9 +140,8 @@ final class SessionLifecycleTests: XCTestCase {
     /// forever, because `.task` never runs a second time. `start()` is reentrancy-guarded,
     /// so the launch case is safe — see the test below.
     func testActiveWithNothingConfiguredAttemptsStart() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
         XCTAssertTrue(vm.lenses.isEmpty)
         XCTAssertFalse(vm.isPreviewMode)
 
@@ -163,9 +161,8 @@ final class SessionLifecycleTests: XCTestCase {
     /// the first `.active` also lands. Exactly one configuration must happen — a second
     /// concurrent `start()` is a no-op, not a parallel reconfiguration of a live session.
     func testConcurrentStartsConfigureOnlyOnce() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
 
         // Two starts in flight at once: the first claims the guard synchronously before
         // suspending on configure(), so the second must find it taken and bail.
@@ -184,10 +181,9 @@ final class SessionLifecycleTests: XCTestCase {
     /// `start()`, so this goes through the real `start()` path with a preview-mode
     /// camera rather than setting the flag directly.
     func testActiveInPreviewModeResumesEvenWithNoLenses() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.isPreviewMode = true                 // and therefore no lenses
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
 
         await vm.start()
         XCTAssertTrue(vm.isPreviewMode)
@@ -406,11 +402,10 @@ final class SessionLifecycleTests: XCTestCase {
     /// `FakeCamera` because `CameraService`'s preview mode is not reachable from a test
     /// bundle (see the note above).
     func testGrayCardLockWithAPreviewModeNeutralReadingRaisesNoError() {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.isPreviewMode = true
         fake.neutralWhiteBalanceResult = (5000, 0)   // CameraService's preview-mode value
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
 
         vm.lockGrayCardWB()
 
@@ -449,11 +444,10 @@ final class SessionLifecycleTests: XCTestCase {
     /// earlier version returned outright and left the viewfinder dead until the app was
     /// backgrounded and foregrounded a second time.
     func testResumeDeferredWhileBusyRunsOnReturnToIdle() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.lenses = [Self.backLens]
         fake.currentLens = Self.backLens
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
         await vm.start()
         vm.phase = .done                       // review sheet up
         fake.reset()
@@ -475,11 +469,10 @@ final class SessionLifecycleTests: XCTestCase {
     /// since nothing was stopped and the bracket owns the device. A Control Center pull
     /// mid-capture is the real case.
     func testActiveWithoutBackgroundDoesNotResumeWhileBusy() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         fake.lenses = [Self.backLens]
         fake.currentLens = Self.backLens
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: makeIsolatedDefaults())
         await vm.start()
         vm.phase = .capturing(frame: 3, of: 8)
         fake.reset()

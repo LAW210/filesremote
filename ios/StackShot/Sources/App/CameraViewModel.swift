@@ -15,8 +15,16 @@ final class CameraViewModel: ObservableObject {
 
     let camera: CameraControlling
     private let preview = PreviewFrameProcessor()
-    private let stacking = StackingService.shared
+    private let stacking: StackPersisting
+    /// Where the persisted capture settings live. Injected for the same reason the camera
+    /// and the stacker are: tests used to scrub nine `capture.*` keys out of the real user
+    /// store and put them back, which once shipped as a bug that wiped them for good.
+    private let defaults: UserDefaults
     private var bracket: FocusBracketController?
+    /// The bracket-then-stack run, kept so it can be cancelled. The bracket has its own
+    /// `cancel()`, but stacking is a compute loop with no controller — the task handle is
+    /// the only thing that reaches it.
+    private var captureTask: Task<Void, Never>?
 
     // Live view
     @Published var viewfinderImage: UIImage?
@@ -195,21 +203,26 @@ final class CameraViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
-    /// The camera is injected so tests can drive every control path with a fake; the
-    /// default keeps production call sites (`StackShotApp`) writing `CameraViewModel()`.
-    init(camera: CameraControlling = CameraService()) {
+    /// Every collaborator that reaches outside the process is injected, so tests can drive
+    /// the control paths, the post-capture path and the persistence path with fakes; the
+    /// defaults keep production call sites (`StackShotApp`) writing `CameraViewModel()`.
+    init(camera: CameraControlling = CameraService(),
+         stacking: StackPersisting = StackingService.shared,
+         defaults: UserDefaults = .standard) {
         self.camera = camera
-        let defaults = CaptureDefaults.load()
-        _evBias = Published(initialValue: defaults.evBias)
-        _kelvin = Published(initialValue: defaults.kelvin)
-        _neutralMeasured = Published(initialValue: defaults.neutralMeasured)
-        _stepCount = Published(initialValue: defaults.stepCount)
-        _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
-        _zebraEnabled = Published(initialValue: defaults.zebraEnabled)
-        _outputFormat = Published(initialValue: defaults.outputFormat)
-        _autoSaveToPhotos = Published(initialValue: defaults.autoSaveToPhotos)
-        _squareGuideEnabled = Published(initialValue: defaults.squareGuideEnabled)
-        measuredTint = defaults.measuredTint
+        self.stacking = stacking
+        self.defaults = defaults
+        let loaded = CaptureDefaults.load(from: defaults)
+        _evBias = Published(initialValue: loaded.evBias)
+        _kelvin = Published(initialValue: loaded.kelvin)
+        _neutralMeasured = Published(initialValue: loaded.neutralMeasured)
+        _stepCount = Published(initialValue: loaded.stepCount)
+        _peakingEnabled = Published(initialValue: loaded.peakingEnabled)
+        _zebraEnabled = Published(initialValue: loaded.zebraEnabled)
+        _outputFormat = Published(initialValue: loaded.outputFormat)
+        _autoSaveToPhotos = Published(initialValue: loaded.autoSaveToPhotos)
+        _squareGuideEnabled = Published(initialValue: loaded.squareGuideEnabled)
+        measuredTint = loaded.measuredTint
         isLoaded = true
     }
 
@@ -422,7 +435,7 @@ final class CameraViewModel: ObservableObject {
             outputFormat: outputFormat,
             autoSaveToPhotos: autoSaveToPhotos,
             squareGuideEnabled: squareGuideEnabled
-        ).save()
+        ).save(to: defaults)
     }
 
     private func persistDefaultsIfLoaded() {
@@ -520,7 +533,7 @@ final class CameraViewModel: ObservableObject {
                                          evBias: evBias)
         let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: measuredTint)
 
-        Task {
+        captureTask = Task {
             do {
                 let set = try await controller.run(plan: plan, exposure: exposure, whiteBalance: wb) { p in
                     Task { @MainActor in
@@ -542,17 +555,43 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    /// Aborts whatever stage the capture is in.
+    ///
+    /// The two stages need different mechanisms. During the bracket the controller owns the
+    /// device and has to unwind its own configuration, so it is asked to stop. During
+    /// stacking there is no device involved and the work is a long compute loop in the
+    /// engine, which honours `Task` cancellation — so cancelling the task is what reaches
+    /// it. Both are done unconditionally: the task also covers the window between the
+    /// stages, and asking a finished bracket to cancel is a no-op.
     func cancelCapture() {
         bracket?.cancel()
+        captureTask?.cancel()
+    }
+
+    /// True while a cancel would abandon a stack rather than a bracket — the case that also
+    /// throws away frames already on disk, so the UI asks first.
+    var isStacking: Bool {
+        if case .stacking = phase { return true }
+        return false
     }
 
     func stack(set: StackSet) async throws {
         phase = .stacking(0)
-        let (updated, output) = try await stacking.stackAndPersist(
-            set,
-            outputFormat: outputFormat,
-            deleteFramesAfter: true) { p in
-            Task { @MainActor in self.phase = .stacking(p) }
+        let (updated, output): (StackSet, StackOutput)
+        do {
+            (updated, output) = try await stacking.stackAndPersist(
+                set,
+                outputFormat: outputFormat,
+                deleteFramesAfter: true) { p in
+                Task { @MainActor in self.phase = .stacking(p) }
+            }
+        } catch is CancellationError {
+            // The frames are still on disk at this point and nothing can ever stack them:
+            // there is no re-stack path, so keeping them would leave a permanent
+            // "not stacked" row in the Library holding a full bracket's storage. A
+            // cancelled bracket already deletes its own directory; this matches it.
+            stacking.discard(set)
+            throw CancellationError()
         }
         resultImage = output.merged
         depthMapImage = output.depthMap

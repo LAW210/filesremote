@@ -384,6 +384,7 @@ struct LoupeView: View {
 
 struct CaptureProgressView: View {
     @EnvironmentObject var vm: CameraViewModel
+    @State private var confirmCancelStack = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -405,12 +406,30 @@ struct CaptureProgressView: View {
             default:
                 EmptyView()
             }
+            // Offered during stacking as well as during the bracket. Stacking is the
+            // multi-minute phase, so it is where the urge to escape actually arrives — and
+            // with no button, the only way out was force-quitting the app.
             if case .capturing = vm.phase {
                 Button("Cancel", role: .destructive) { vm.cancelCapture() }
+            } else if vm.isStacking {
+                // Asks first, because this one is not free: the frames are captured and on
+                // disk, and cancelling deletes them. Cancelling a bracket only abandons an
+                // exposure that was still being taken.
+                Button("Cancel", role: .destructive) { confirmCancelStack = true }
             }
         }
         .padding()
         .foregroundStyle(.white)
         .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
+        .confirmationDialog("Discard this capture?",
+                            isPresented: $confirmCancelStack,
+                            titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { vm.cancelCapture() }
+            Button("Keep stacking", role: .cancel) {}
+        } message: {
+            Text("The frames are already captured, but they can't be stacked later — "
+                 + "cancelling deletes them and you'll need to shoot the bracket again. "
+                 + "Your exposure, colour and focus anchors are kept.")
+        }
     }
 }

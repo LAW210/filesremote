@@ -61,10 +61,9 @@ final class LensSwitchSerialisationTests: XCTestCase {
     /// `tele` reaches the device first, `ultra` lands on top of it when the gate opens, and
     /// the camera finishes on `ultra` while `selectedLensID` says `tele`.
     func testASecondLensSwitchWaitsForTheFirstToReachTheDevice() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         let gate = GatedLensCamera(inner: fake)
-        let vm = CameraViewModel(camera: gate)
+        let vm = CameraViewModel(camera: gate, defaults: makeIsolatedDefaults())
         vm.lenses = Self.threeLenses()
         vm.selectedLensID = "wide"
         fake.reset()
@@ -106,10 +105,9 @@ final class LensSwitchSerialisationTests: XCTestCase {
     /// Three taps, to pin that the chain is a chain and not a one-deep special case: the
     /// device must see every lens in request order and finish on the last one asked for.
     func testThreeRapidSwitchesReachTheDeviceInRequestOrder() async {
-        isolatePersistedCaptureDefaults()
         let fake = FakeCamera()
         let gate = GatedLensCamera(inner: fake)
-        let vm = CameraViewModel(camera: gate)
+        let vm = CameraViewModel(camera: gate, defaults: makeIsolatedDefaults())
         vm.lenses = Self.threeLenses()
         vm.selectedLensID = "wide"
         fake.reset()
