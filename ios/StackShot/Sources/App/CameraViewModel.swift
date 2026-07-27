@@ -15,8 +15,33 @@ final class CameraViewModel: ObservableObject {
 
     let camera: CameraControlling
     private let preview = PreviewFrameProcessor()
-    private let stacking = StackingService.shared
-    private var bracket: FocusBracketController?
+    private let stacking: StackPersisting
+    /// Where the persisted capture settings live. Injected for the same reason the camera
+    /// and the stacker are: tests used to scrub nine `capture.*` keys out of the real user
+    /// store and put them back, which once shipped as a bug that wiped them for good.
+    private let defaults: UserDefaults
+    /// Builds the bracket for a capture. Injected rather than constructed inline so
+    /// `captureStack()` can be driven without a real sweep writing real StackSet
+    /// directories into the host's Documents folder — and so a progress tick can be held
+    /// and delivered late, which is the only way to exercise the gate that drops one.
+    private let makeBracket: (CameraControlling) -> BracketRunning
+    private var bracket: BracketRunning?
+    /// The bracket-then-stack run, kept so it can be cancelled. The bracket has its own
+    /// `cancel()`, but stacking is a compute loop with no controller — the task handle is
+    /// the only thing that reaches it.
+    private var captureTask: Task<Void, Never>?
+
+    /// True once the current run has left the bracket, so a frame tick that was already in
+    /// flight when stacking began cannot reopen the capture stage.
+    ///
+    /// Tracked per run rather than derived from `phase`, which looks like it would do the
+    /// job and doesn't: when a capture starts, `phase` may still be `.done` from the
+    /// previous one — the review sheet owns the screen there, and `dismissReview()` only
+    /// happens to run first — so rejecting ticks on the strength of `phase` alone would
+    /// silently suppress the entire next bracket's countdown and frame progress. That would
+    /// be a worse bug than the one the gate exists to prevent, and it would depend on the UI
+    /// dismissing a sheet to not happen.
+    private var bracketStageOver = false
 
     // Live view
     @Published var viewfinderImage: UIImage?
@@ -31,7 +56,6 @@ final class CameraViewModel: ObservableObject {
     @Published private(set) var loupeMagnification = AppConfig.Loupe.defaultMagnification
     /// Magnification at the start of the current pinch.
     private var loupeGestureBase = AppConfig.Loupe.defaultMagnification
-    @Published var histogram: [Float] = []
     @Published var errorMessage: String?
     /// True when `CameraService` fell back to synthetic preview frames because no
     /// physical camera was found (the Simulator). Read by the UI layer to draw a
@@ -54,17 +78,11 @@ final class CameraViewModel: ObservableObject {
     /// Recorded silently — ISO and shutter are not surfaced in the UI.
     private var lockedExposure: (iso: Float, shutterSeconds: Double)?
 
-    // Both push to the device on change, like every other live control. Without this
-    // the Kelvin slider and its presets did nothing until `lockExposure()` happened to
-    // apply them — you could not see the colour you were choosing, which is the whole
-    // point of the control in a fixed light box.
+    // Pushes to the device on change, like every other live control. Without this the
+    // Kelvin slider did nothing until `lockExposure()` happened to apply it — you could
+    // not see the colour you were choosing, which is the whole point of the control in a
+    // fixed light box.
     @Published var kelvin: Float {
-        didSet {
-            pushWhiteBalance()
-            persistDefaultsIfLoaded()
-        }
-    }
-    @Published var tint: Float {
         didSet {
             pushWhiteBalance()
             persistDefaultsIfLoaded()
@@ -149,10 +167,39 @@ final class CameraViewModel: ObservableObject {
     /// be replaced.
     private var resumeTask: Task<Void, Never>?
 
-    /// Set while `kelvin`/`tint` are being assigned from a device measurement, so their
-    /// observers don't immediately push the rounded values back over it. See
+    /// Set while `kelvin` is being assigned from a device measurement, so its observer
+    /// doesn't immediately push the rounded value back over it. See
     /// `lockGrayCardWB()`.
     private var suppressWhiteBalancePush = false
+
+    /// Whether a neutral measurement has been taken on the current lens.
+    ///
+    /// Surfaced so the exposure panel can say so. Without it there is no way to tell a
+    /// measured white balance from a coincidentally similar Kelvin value, and the one
+    /// question that actually matters mid-setup — "did I already meter the backdrop,
+    /// before I raised EV and put the reel back?" — had no answer anywhere on screen.
+    @Published private(set) var neutralMeasured = false
+
+    /// The green/magenta component of the last gray-card measurement, carried forward
+    /// into subsequent white-balance writes.
+    ///
+    /// Tint is not a control — a fixed light box does not drift on that axis, and asking
+    /// anyone to judge green versus magenta by eye is worse than measuring it. But the
+    /// measurement genuinely finds one: cheap LED panels commonly have a green spike, and
+    /// Kelvin cannot correct for it at any setting. Keeping the measured value here means
+    /// nudging Kelvin afterwards re-derives gains that still include the cast the card
+    /// found, instead of quietly resetting that axis to neutral.
+    private var measuredTint: Float = 0
+
+    /// True when the current anchors were carried over from a completed capture rather
+    /// than set for what is in front of the camera now.
+    ///
+    /// Anchors deliberately survive a capture, so re-shooting the same reel at a different
+    /// frame count is one tap. The hazard is the other case: swap the reel and the shutter
+    /// is still armed with the previous product's focus planes, which would stack the
+    /// wrong distances and look like the sweep misbehaving. Cleared the moment either
+    /// anchor is set again.
+    @Published private(set) var anchorsFromPreviousCapture = false
 
     /// Label for the lens button — the lens currently attached.
     var currentLensName: String {
@@ -173,20 +220,30 @@ final class CameraViewModel: ObservableObject {
 
     // MARK: - Lifecycle
 
-    /// The camera is injected so tests can drive every control path with a fake; the
-    /// default keeps production call sites (`StackShotApp`) writing `CameraViewModel()`.
-    init(camera: CameraControlling = CameraService()) {
+    /// Every collaborator that reaches outside the process is injected, so tests can drive
+    /// the control paths, the post-capture path and the persistence path with fakes; the
+    /// defaults keep production call sites (`StackShotApp`) writing `CameraViewModel()`.
+    init(camera: CameraControlling = CameraService(),
+         stacking: StackPersisting = StackingService.shared,
+         defaults: UserDefaults = .standard,
+         makeBracket: @escaping (CameraControlling) -> BracketRunning = {
+             FocusBracketController(camera: $0)
+         }) {
+        self.makeBracket = makeBracket
         self.camera = camera
-        let defaults = CaptureDefaults.load()
-        _evBias = Published(initialValue: defaults.evBias)
-        _kelvin = Published(initialValue: defaults.kelvin)
-        _tint = Published(initialValue: defaults.tint)
-        _stepCount = Published(initialValue: defaults.stepCount)
-        _peakingEnabled = Published(initialValue: defaults.peakingEnabled)
-        _zebraEnabled = Published(initialValue: defaults.zebraEnabled)
-        _outputFormat = Published(initialValue: defaults.outputFormat)
-        _autoSaveToPhotos = Published(initialValue: defaults.autoSaveToPhotos)
-        _squareGuideEnabled = Published(initialValue: defaults.squareGuideEnabled)
+        self.stacking = stacking
+        self.defaults = defaults
+        let loaded = CaptureDefaults.load(from: defaults)
+        _evBias = Published(initialValue: loaded.evBias)
+        _kelvin = Published(initialValue: loaded.kelvin)
+        _neutralMeasured = Published(initialValue: loaded.neutralMeasured)
+        _stepCount = Published(initialValue: loaded.stepCount)
+        _peakingEnabled = Published(initialValue: loaded.peakingEnabled)
+        _zebraEnabled = Published(initialValue: loaded.zebraEnabled)
+        _outputFormat = Published(initialValue: loaded.outputFormat)
+        _autoSaveToPhotos = Published(initialValue: loaded.autoSaveToPhotos)
+        _squareGuideEnabled = Published(initialValue: loaded.squareGuideEnabled)
+        measuredTint = loaded.measuredTint
         isLoaded = true
     }
 
@@ -210,7 +267,6 @@ final class CameraViewModel: ObservableObject {
                 Task { @MainActor in
                     self.viewfinderImage = output.viewfinder
                     self.loupeImage = output.loupe
-                    self.histogram = output.histogram
                 }
             }
             syncPreviewSettings()
@@ -294,6 +350,9 @@ final class CameraViewModel: ObservableObject {
             nearAnchor = nil
             farAnchor = nil
             torchEnabled = false        // torch belongs to the previous device
+            measuredTint = 0            // and so does a neutral measurement
+            neutralMeasured = false
+            persistDefaults()           // or a relaunch would restore the stale one
             applyExposureBias()         // metering bias is per-device
             pushWhiteBalance()          // and so is white balance
             // The new device defaults to continuous AF. Push the slider's value
@@ -320,7 +379,7 @@ final class CameraViewModel: ObservableObject {
     /// always the value shown in the panel.
     private func pushWhiteBalance() {
         guard !suppressWhiteBalancePush else { return }
-        try? camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+        try? camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
     }
 
     /// Freezes metering and white balance so every frame in the bracket matches.
@@ -343,7 +402,7 @@ final class CameraViewModel: ObservableObject {
     private func freezeExposureAndWhiteBalance() async throws {
         await camera.waitForExposureSettle()
         lockedExposure = try camera.lockExposure()
-        try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+        try camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
     }
 
     /// Returns to live metering so the EV slider takes effect again.
@@ -356,7 +415,7 @@ final class CameraViewModel: ObservableObject {
     /// Locks white balance from a neutral gray/white card filling the frame.
     ///
     /// The measured gray-world gains are what the device keeps. Reflecting the equivalent
-    /// Kelvin/tint back into the sliders must therefore NOT push them out again: that
+    /// Kelvin back into the slider must therefore NOT push it out again: that
     /// would re-derive gains from numbers that have been round-tripped and clamped to the
     /// slider's range, quietly throwing away the measurement the card was held up for.
     /// A card reading outside `kelvinRange` shows the nearest value the slider can
@@ -364,9 +423,10 @@ final class CameraViewModel: ObservableObject {
     func lockGrayCardWB() {
         do {
             let result = try camera.lockNeutralWhiteBalance()
+            measuredTint = result.tint
+            neutralMeasured = true
             withWhiteBalancePushSuppressed {
                 kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
-                tint = result.tint.clamped(to: AppConfig.Exposure.tintRange)
             }
             persistDefaults()
         } catch {
@@ -374,7 +434,7 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
-    /// Runs `body` with the `kelvin`/`tint` observers' device push disabled, for the one
+    /// Runs `body` with the `kelvin` observer's device push disabled, for the one
     /// case where the values are being set *from* the device rather than sent to it.
     private func withWhiteBalancePushSuppressed(_ body: () -> Void) {
         suppressWhiteBalancePush = true
@@ -388,14 +448,15 @@ final class CameraViewModel: ObservableObject {
         CaptureDefaults(
             evBias: evBias,
             kelvin: kelvin,
-            tint: tint,
+            measuredTint: measuredTint,
+            neutralMeasured: neutralMeasured,
             stepCount: stepCount,
             peakingEnabled: peakingEnabled,
             zebraEnabled: zebraEnabled,
             outputFormat: outputFormat,
             autoSaveToPhotos: autoSaveToPhotos,
             squareGuideEnabled: squareGuideEnabled
-        ).save()
+        ).save(to: defaults)
     }
 
     private func persistDefaultsIfLoaded() {
@@ -449,8 +510,15 @@ final class CameraViewModel: ObservableObject {
         preview.update { $0.loupeMagnification = loupeMagnification }
     }
 
-    func markNear() { nearAnchor = lensPosition }
-    func markFar() { farAnchor = lensPosition }
+    func markNear() {
+        nearAnchor = lensPosition
+        anchorsFromPreviousCapture = false
+    }
+
+    func markFar() {
+        farAnchor = lensPosition
+        anchorsFromPreviousCapture = false
+    }
 
     // MARK: - Torch
 
@@ -471,29 +539,46 @@ final class CameraViewModel: ObservableObject {
 
     func captureStack() {
         guard let near = nearAnchor, let far = farAnchor, canCapture else { return }
+        // Nothing here used to leave `.idle` synchronously: the phase only moved when the
+        // bracket's first progress callback hopped back to the main actor, and the shutter
+        // is on screen for exactly as long as the phase is `.idle`. So a double-tap — one
+        // fat-fingered press — started two brackets against one camera, each writing its own
+        // set, while `bracket` and `captureTask` pointed only at the second. The first was
+        // then unstoppable: Cancel could not reach it. The guard closes the window and the
+        // synchronous phase write below keeps it closed.
+        guard phase == .idle else { return }
         // Clear the previous result here rather than on review dismissal, so the
         // outgoing sheet keeps showing its image until it is actually gone.
         resultImage = nil
         depthMapImage = nil
         resultSavedToPhotos = false
+        // Cleared with them, not left behind. `mergedFileURL` is derived from it, so a stale
+        // `lastSet` left the share and save actions pointing at the *previous* capture's
+        // file while `resultImage` was nil — exporting the wrong photo, silently.
+        lastSet = nil
+        bracketStageOver = false
+        // Claimed synchronously, so the shutter is off screen before this method returns
+        // rather than one main-actor hop later. The bracket reports the same phase itself a
+        // moment later, which is a harmless no-op.
+        phase = .countdown(AppConfig.Bracket.startTimerSeconds)
 
-        let controller = FocusBracketController(camera: camera)
+        let controller = makeBracket(camera)
         bracket = controller
         let plan = FocusBracketController.Plan(near: near, far: far, stepCount: stepCount)
         let settled = lockedExposure ?? camera.currentExposure ?? (iso: 0, shutterSeconds: 0)
         let exposure = StackSet.Exposure(iso: settled.iso,
                                          shutterSeconds: settled.shutterSeconds,
                                          evBias: evBias)
-        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: tint)
+        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: measuredTint)
 
-        Task {
+        captureTask = Task {
             do {
                 let set = try await controller.run(plan: plan, exposure: exposure, whiteBalance: wb) { p in
                     Task { @MainActor in
                         switch p {
-                        case .startingTimer(let s): self.phase = .countdown(s)
+                        case .startingTimer(let s): self.reportBracketPhase(.countdown(s))
                         case .capturing(let f, let n):
-                            self.phase = .capturing(frame: f, of: n)
+                            guard self.reportBracketPhase(.capturing(frame: f, of: n)) else { return }
                             self.playFrameTick()
                         }
                     }
@@ -508,17 +593,70 @@ final class CameraViewModel: ObservableObject {
         }
     }
 
+    /// Aborts whatever stage the capture is in.
+    ///
+    /// The two stages need different mechanisms. During the bracket the controller owns the
+    /// device and has to unwind its own configuration, so it is asked to stop. During
+    /// stacking there is no device involved and the work is a long compute loop in the
+    /// engine, which honours `Task` cancellation — so cancelling the task is what reaches
+    /// it. Both are done unconditionally: the task also covers the window between the
+    /// stages, and asking a finished bracket to cancel is a no-op.
     func cancelCapture() {
         bracket?.cancel()
+        captureTask?.cancel()
+    }
+
+    /// True while a cancel would abandon a stack rather than a bracket — the case that also
+    /// throws away frames already on disk, so the UI asks first.
+    var isStacking: Bool {
+        if case .stacking = phase { return true }
+        return false
+    }
+
+    // Progress is emitted from off the main actor and delivered by a `Task { @MainActor }`
+    // hop per tick. Those hops are unordered with respect to the code that emitted them, so
+    // a tick sent just before a stage ended can be *delivered* after the phase has already
+    // moved on. Applied blindly it reopened a stage that was over: a late `.stacking` tick
+    // landing after `.done` pinned the UI on a progress bar over a finished stack — no
+    // review sheet, cancel armed, indistinguishable from a hang — and a late `.capturing`
+    // tick could overwrite `.stacking(0)` the instant stacking began. Both writes are
+    // therefore gated on the phase they describe still being the current one.
+
+    /// Applies a stacking progress tick, if stacking is still what's happening.
+    private func reportStackProgress(_ progress: Double) {
+        guard isStacking else { return }
+        phase = .stacking(progress)
+    }
+
+    /// Applies a bracket phase, if the bracket hasn't already finished. Returns whether it
+    /// was applied, so a caller doesn't tick the shutter sound for a frame that is history.
+    @discardableResult
+    private func reportBracketPhase(_ newPhase: Phase) -> Bool {
+        guard !bracketStageOver else { return false }
+        phase = newPhase
+        return true
     }
 
     func stack(set: StackSet) async throws {
+        // Closes the bracket stage before the phase moves, so a frame tick still in flight
+        // is dropped rather than landing on top of `.stacking(0)`.
+        bracketStageOver = true
         phase = .stacking(0)
-        let (updated, output) = try await stacking.stackAndPersist(
-            set,
-            outputFormat: outputFormat,
-            deleteFramesAfter: true) { p in
-            Task { @MainActor in self.phase = .stacking(p) }
+        let (updated, output): (StackSet, StackOutput)
+        do {
+            (updated, output) = try await stacking.stackAndPersist(
+                set,
+                outputFormat: outputFormat,
+                deleteFramesAfter: true) { p in
+                Task { @MainActor in self.reportStackProgress(p) }
+            }
+        } catch is CancellationError {
+            // The frames are still on disk at this point and nothing can ever stack them:
+            // there is no re-stack path, so keeping them would leave a permanent
+            // "not stacked" row in the Library holding a full bracket's storage. A
+            // cancelled bracket already deletes its own directory; this matches it.
+            stacking.discard(set)
+            throw CancellationError()
         }
         resultImage = output.merged
         depthMapImage = output.depthMap
@@ -529,10 +667,19 @@ final class CameraViewModel: ObservableObject {
             do {
                 try await stacking.saveFileToPhotos(url)
                 resultSavedToPhotos = true
+            } catch is CancellationError {
+                // A cancel that arrives this late is too late to mean anything: the stack is
+                // encoded, on disk and in the manifest. Reporting it raised "The operation
+                // was cancelled" as a failure alert over a capture that had entirely
+                // succeeded — only the Photos copy was skipped.
             } catch {
                 report(error)    // stacking still succeeded; only the Photos add failed
             }
         }
+        // The anchors stay, so the same reel can be re-shot at a different frame count —
+        // but they are now a carry-over, and the focus panel says so, because the next
+        // subject may not be the one they were set on.
+        anchorsFromPreviousCapture = true
         phase = .done
         playCompletionSound()
     }
@@ -640,7 +787,7 @@ final class CameraViewModel: ObservableObject {
                 // Colour is a manual setting either way, so it has to be restored even
                 // when exposure is live — otherwise a background trip silently reverts
                 // the light box's white balance to whatever the device decides.
-                try camera.setWhiteBalance(kelvin: kelvin, tint: tint)
+                try camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
             }
             try camera.setFocus(lensPosition: lensPosition)
         } catch {

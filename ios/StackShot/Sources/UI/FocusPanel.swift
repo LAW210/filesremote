@@ -31,12 +31,12 @@ struct FocusPanel: View {
             }
 
             HStack {
-                Text(String(format: "lens %.3f", vm.lensPosition))
-                    .font(.caption).monospacedDigit()
                 Spacer()
                 Toggle(isOn: .init(get: { vm.loupeVisible },
                                    set: { vm.setLoupe(visible: $0) })) {
-                    Label("3× loupe", systemImage: "magnifyingglass.circle")
+                    // Not "3x loupe": magnification is adjustable from the loupe itself,
+                    // so a fixed number in the label goes stale the moment it is changed.
+                    Label("Loupe", systemImage: "magnifyingglass.circle")
                         .font(.caption)
                 }
                 .toggleStyle(.button)
@@ -57,6 +57,18 @@ struct FocusPanel: View {
                 anchorButton(title: "Set Far",
                              value: vm.farAnchor,
                              action: vm.markFar)
+            }
+
+            // Anchors survive a capture on purpose — re-shooting the same reel at a
+            // different frame count should not mean re-doing the loupe work. But they are
+            // positions on the *previous* subject until re-set, and a swapped reel with a
+            // still-armed shutter would stack the wrong distances and read as the sweep
+            // misbehaving rather than as stale input.
+            if vm.anchorsFromPreviousCapture {
+                Label("Anchors are from your last capture. Re-set them for a different reel.",
+                      systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.orange)
             }
 
             if vm.nearAnchor != nil || vm.farAnchor != nil {

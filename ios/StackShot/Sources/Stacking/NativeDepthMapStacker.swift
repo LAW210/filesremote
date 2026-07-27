@@ -8,6 +8,13 @@ import UIKit
 /// frame, smooth the sharpness maps, pick the sharpest source frame per pixel (a depth
 /// map by construction, since frames are in near→far order), then composite.
 /// No alignment — acceptable for the tripod-mounted v1 draft; the C++ engine adds ECC.
+///
+/// **Cancellation granularity is one frame.** The checks sit at the frame boundaries of
+/// both passes, not inside the per-pixel loops: `sharpnessMap` and `medianSmooth` are
+/// non-throwing pure functions over flat arrays, and threading a cancellation check
+/// through their inner loops would cost a branch per pixel to shave at most a couple of
+/// seconds off the response. Cancelling therefore takes effect within roughly one frame's
+/// processing time rather than instantly, which is the honest thing to promise the caller.
 final class NativeDepthMapStacker: StackEngine {
     let name = "native depth-map (Swift fallback)"
 
@@ -34,6 +41,10 @@ final class NativeDepthMapStacker: StackEngine {
 
         // Pass 1: accumulate the per-pixel sharpest-frame index.
         for (i, url) in frameURLs.enumerated() {
+            // Before the decode, so a cancelled run doesn't pay for a frame it will
+            // discard. Throwing here leaves nothing to clean up: this engine writes no
+            // files, and every buffer it owns is freed by the `defer` below.
+            try Task.checkCancellation()
             let buffer = try decodeFrame(at: url)
             defer { free(buffer.data) }
 
@@ -57,14 +68,28 @@ final class NativeDepthMapStacker: StackEngine {
             progress(0.6 * Double(i + 1) / Double(frameURLs.count))
         }
         bestValue = []      // no longer needed; release before the composite pass
+        try Task.checkCancellation()
         bestIndex = medianSmooth(bestIndex, width: width, height: height)
 
         // Pass 2: re-decode each frame and copy only the pixels it won.
         let count = width * height
         var out = [UInt8](repeating: 0, count: count * 4)
         for (i, url) in frameURLs.enumerated() {
+            try Task.checkCancellation()
             let buffer = try decodeFrame(at: url)
             defer { free(buffer.data) }
+            // Re-checked, even though pass 1 already validated every frame and both passes
+            // decode the same files deterministically. The composite below indexes this
+            // buffer with `row * buffer.rowBytes + col * 4` where row and col come from
+            // pass 1's dimensions, so if this frame were ever smaller the read would run
+            // off the end of the allocation — an out-of-bounds read, in a loop, over the
+            // user's photo. The check costs two comparisons per frame; being wrong here
+            // costs a crash or silently corrupt pixels.
+            guard Int(buffer.width) == width, Int(buffer.height) == height else {
+                throw StackEngineError.engineFailed(
+                    "frame \(i) changed size between passes (\(buffer.width)x\(buffer.height) "
+                    + "vs \(width)x\(height))")
+            }
             let tag = UInt8(i)
             for p in 0..<count where bestIndex[p] == tag {
                 let row = p / width, col = p % width
@@ -74,6 +99,11 @@ final class NativeDepthMapStacker: StackEngine {
             }
             progress(0.6 + 0.4 * Double(i + 1) / Double(frameURLs.count))
         }
+
+        // Last gate before a result exists. Past this point the caller has an image and
+        // will start writing files, so a cancellation noticed later would have to be
+        // ignored rather than honoured.
+        try Task.checkCancellation()
 
         guard let provider = CGDataProvider(data: Data(out) as CFData),
               let cg = CGImage(width: width, height: height,

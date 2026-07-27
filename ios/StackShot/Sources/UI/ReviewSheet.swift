@@ -46,7 +46,9 @@ struct ReviewSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                // Confirms the auto-save landed; the Library can re-save if it didn't.
+                // Confirms the auto-save landed. Nothing offers a re-save if it didn't —
+                // the Library's Save-to-Photos button is gone — so its absence here is the
+                // only signal, which is why the failure also raises an error alert.
                 if vm.resultSavedToPhotos {
                     Label("Saved to Photos", systemImage: "checkmark.circle")
                         .font(.caption)

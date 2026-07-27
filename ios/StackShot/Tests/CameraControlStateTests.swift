@@ -10,9 +10,10 @@ final class CameraControlStateTests: XCTestCase {
 
     // MARK: - Helpers
 
+    /// Each call gets a defaults store of its own, so nothing here touches the settings of
+    /// whatever app hosts the test bundle.
     private func makeViewModel(_ camera: FakeCamera) -> CameraViewModel {
-        isolatePersistedCaptureDefaults()
-        return CameraViewModel(camera: camera)
+        CameraViewModel(camera: camera, defaults: makeIsolatedDefaults())
     }
 
     /// Waits for `condition`, which is how the results of `selectLens()` and
@@ -55,41 +56,29 @@ final class CameraControlStateTests: XCTestCase {
 
     // MARK: - White balance
 
-    /// Regression guard: both colour sliders used to change nothing on the device until a
-    /// later `lockExposure()` happened to apply them, so you could not see the colour you
-    /// were choosing. Each has to push the *pair*, since the device takes them together.
-    func testChangingKelvinPushesTheCurrentKelvinAndTintPair() {
+    /// Regression guard: the Kelvin slider used to change nothing on the device until a
+    /// later `lockExposure()` happened to apply it, so you could not see the colour you
+    /// were choosing.
+    func testChangingKelvinPushesItToTheDevice() {
         let fake = FakeCamera()
         let vm = makeViewModel(fake)
-        vm.tint = 12
         fake.reset()
 
         vm.kelvin = 4300
 
-        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4300, tint: 12)])
+        // Tint is always neutral now: AVFoundation's pair needs a value, but green/magenta
+        // correction is not a control any more.
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4300, tint: 0)])
         XCTAssertEqual(fake.whiteBalance?.kelvin, 4300)
-        XCTAssertEqual(fake.whiteBalance?.tint, 12)
-    }
-
-    func testChangingTintPushesTheCurrentKelvinAndTintPair() {
-        let fake = FakeCamera()
-        let vm = makeViewModel(fake)
-        vm.kelvin = 3200
-        fake.reset()
-
-        vm.tint = -20
-
-        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 3200, tint: -20)])
-        XCTAssertEqual(fake.whiteBalance?.kelvin, 3200)
-        XCTAssertEqual(fake.whiteBalance?.tint, -20)
+        XCTAssertEqual(fake.whiteBalance?.tint, 0)
     }
 
     // MARK: - Gray card
 
-    /// The measured gains are what the device keeps. Reflecting the equivalent Kelvin/tint
-    /// into the sliders must not push them back out — that would re-derive gains from
+    /// The measured gains are what the device keeps. Reflecting the equivalent Kelvin
+    /// into the slider must not push it back out — that would re-derive gains from
     /// round-tripped numbers and throw away the measurement the card was held up for.
-    func testGrayCardLockDoesNotPushTheSliderValuesBackOverTheMeasurement() {
+    func testGrayCardLockDoesNotPushTheSliderValueBackOverTheMeasurement() {
         let fake = FakeCamera()
         let vm = makeViewModel(fake)
         fake.neutralWhiteBalanceResult = (kelvin: 4870, tint: 7)
@@ -98,7 +87,8 @@ final class CameraControlStateTests: XCTestCase {
 
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
         XCTAssertEqual(vm.kelvin, 4870)
-        XCTAssertEqual(vm.tint, 7)
+        // The device keeps the measured gains, tint component included — that is the point
+        // of measuring. Only the slider-visible Kelvin comes back.
         XCTAssertEqual(fake.whiteBalance?.kelvin, 4870)
         XCTAssertEqual(fake.whiteBalance?.tint, 7)
     }
@@ -106,7 +96,7 @@ final class CameraControlStateTests: XCTestCase {
     /// A card reading outside the slider's range shows the nearest representable value
     /// while the device holds the real one — so the clamp must land in the UI only, and
     /// must still not be pushed back.
-    func testGrayCardLockClampsTheSlidersButLeavesTheDeviceOnTheMeasuredValues() {
+    func testGrayCardLockClampsTheSliderButLeavesTheDeviceOnTheMeasuredValues() {
         let fake = FakeCamera()
         let vm = makeViewModel(fake)
         fake.neutralWhiteBalanceResult = (kelvin: 9200, tint: -80)
@@ -114,10 +104,89 @@ final class CameraControlStateTests: XCTestCase {
         vm.lockGrayCardWB()
 
         XCTAssertEqual(vm.kelvin, AppConfig.Exposure.kelvinRange.upperBound)
-        XCTAssertEqual(vm.tint, AppConfig.Exposure.tintRange.lowerBound)
         XCTAssertEqual(fake.whiteBalance?.kelvin, 9200)
         XCTAssertEqual(fake.whiteBalance?.tint, -80)
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
+    }
+
+    /// The panel reports whether neutral has been measured, so the owner can tell by
+    /// looking rather than remembering — the order (measure before raising EV) matters and
+    /// getting it wrong fails silently.
+    func testNeutralMeasuredFlagTracksTheMeasurement() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        XCTAssertFalse(vm.neutralMeasured)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertTrue(vm.neutralMeasured)
+    }
+
+    /// A failed measurement must not claim to have happened.
+    func testFailedMeasurementLeavesNeutralUnmeasured() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("lockNeutralWhiteBalance", with: CameraError.configurationFailed)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertFalse(vm.neutralMeasured)
+    }
+
+    /// Switching lenses drops it alongside the measured tint: the measurement belongs to
+    /// the module it was taken on.
+    func testSwitchingLensClearsTheNeutralMeasuredFlag() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        vm.lockGrayCardWB()
+        XCTAssertTrue(vm.neutralMeasured)
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to reach the device") {
+            fake.calls.contains { if case .select = $0 { return true } else { return false } }
+        }
+
+        XCTAssertFalse(vm.neutralMeasured)
+    }
+
+    /// The measured green/magenta component is carried forward, not discarded.
+    ///
+    /// Tint is not a control, but the card measurement finds a real one — a cheap LED
+    /// panel commonly has a green spike that Kelvin cannot correct at any setting. If the
+    /// measurement were dropped, nudging Kelvin after measuring would silently reset that
+    /// axis to neutral and put the cast back.
+    func testKelvinChangeAfterAGrayCardLockKeepsTheMeasuredTint() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.neutralWhiteBalanceResult = (kelvin: 4800, tint: 9)
+        vm.lockGrayCardWB()
+        fake.reset()
+
+        vm.kelvin = 5200
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 5200, tint: 9)])
+    }
+
+    /// A measurement belongs to the module it was taken on, so switching lenses drops it
+    /// rather than applying one camera's cast to another's.
+    func testSwitchingLensClearsTheMeasuredTint() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        fake.neutralWhiteBalanceResult = (kelvin: 4800, tint: 9)
+        vm.lockGrayCardWB()
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to reach the device") {
+            fake.calls.contains { if case .select = $0 { return true } else { return false } }
+        }
+        fake.reset()
+        vm.kelvin = 5000
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 5000, tint: 0)])
     }
 
     /// The suppression must be released, not just applied.
@@ -136,7 +205,7 @@ final class CameraControlStateTests: XCTestCase {
 
         vm.kelvin = 4200
 
-        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4200, tint: vm.tint)])
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4200, tint: 3)])
     }
 
     /// And released even when the measurement fails, since the flag is set around the
@@ -150,19 +219,18 @@ final class CameraControlStateTests: XCTestCase {
 
         vm.kelvin = 3900
 
-        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 3900, tint: vm.tint)])
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 3900, tint: 0)])
     }
 
-    func testGrayCardLockFailureIsReportedAndLeavesTheSlidersAlone() {
+    func testGrayCardLockFailureIsReportedAndLeavesTheSliderAlone() {
         let fake = FakeCamera()
         let vm = makeViewModel(fake)
-        let before = (kelvin: vm.kelvin, tint: vm.tint)
+        let before = vm.kelvin
         fake.fail("lockNeutralWhiteBalance", with: CameraError.configurationFailed)
 
         vm.lockGrayCardWB()
 
-        XCTAssertEqual(vm.kelvin, before.kelvin)
-        XCTAssertEqual(vm.tint, before.tint)
+        XCTAssertEqual(vm.kelvin, before)
         XCTAssertNotNil(vm.errorMessage)
     }
 
@@ -231,7 +299,6 @@ final class CameraControlStateTests: XCTestCase {
         let fake = FakeCamera()
         let vm = makeViewModel(fake)
         vm.kelvin = 3200
-        vm.tint = 5
         fake.reset()
 
         vm.lockExposure()
@@ -240,7 +307,7 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertEqual(fake.calls, [
             .waitForExposureSettle(timeout: 1.5),
             .lockExposure,
-            .setWhiteBalance(kelvin: 3200, tint: 5),
+            .setWhiteBalance(kelvin: 3200, tint: 0),
         ])
     }
 
@@ -427,6 +494,30 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertNotNil(vm.errorMessage)
     }
 
+    // MARK: - Carried-over anchors
+
+    /// Anchors survive a capture so the same reel can be re-shot, but they are the
+    /// previous subject's positions until re-set — and a swapped reel shot on stale
+    /// anchors would look like the focus sweep misbehaving.
+    func testMarkingAnAnchorClearsTheCarriedOverFlag() {
+        let vm = makeViewModel(FakeCamera())
+        vm.nearAnchor = 0.2
+        vm.farAnchor = 0.8
+
+        vm.markNear()
+
+        XCTAssertFalse(vm.anchorsFromPreviousCapture)
+    }
+
+    func testMarkingFarAlsoClearsTheCarriedOverFlag() {
+        let vm = makeViewModel(FakeCamera())
+
+        vm.markFar()
+
+        XCTAssertFalse(vm.anchorsFromPreviousCapture)
+        XCTAssertEqual(vm.farAnchor, vm.lensPosition)
+    }
+
     // MARK: - Loupe magnification
 
     /// Magnification is one stored value, mirrored into the frame processor. It used to be
@@ -484,23 +575,22 @@ final class CameraControlStateTests: XCTestCase {
     /// Both persisted manual settings have to reach the device on launch, or the viewfinder
     /// opens on the camera's own guess while the panel shows last session's numbers.
     func testStartPushesThePersistedExposureBiasAndWhiteBalance() async {
-        // Registers its own snapshot/restore teardown, so the keys written below are
-        // undone with everything else.
-        isolatePersistedCaptureDefaults()
-        UserDefaults.standard.set(Float(1.5), forKey: "capture.evBias")
-        UserDefaults.standard.set(Float(3200), forKey: "capture.kelvin")
-        UserDefaults.standard.set(Float(-10), forKey: "capture.tint")
+        // Seeded in this test's own store, which is discarded at teardown. Written through
+        // the `Key` constants `CaptureDefaults.load` reads, so a renamed key cannot leave
+        // this test silently seeding nothing.
+        let defaults = makeIsolatedDefaults()
+        defaults.set(Float(1.5), forKey: CaptureDefaults.Key.evBias)
+        defaults.set(Float(3200), forKey: CaptureDefaults.Key.kelvin)
 
         let fake = FakeCamera()
         fake.lenses = threeLenses()
         fake.currentLens = fake.lenses.first
-        let vm = CameraViewModel(camera: fake)
+        let vm = CameraViewModel(camera: fake, defaults: defaults)
 
         await vm.start()
 
         XCTAssertEqual(vm.evBias, 1.5)
         XCTAssertEqual(vm.kelvin, 3200)
-        XCTAssertEqual(vm.tint, -10)
         XCTAssertEqual(vm.selectedLensID, "wide")
         // Focus is pushed here too: a freshly attached device defaults to continuous AF,
         // so without it the slider would read its default while the lens did something
@@ -510,12 +600,11 @@ final class CameraControlStateTests: XCTestCase {
             .configure,
             .start,
             .setExposureBias(1.5),
-            .setWhiteBalance(kelvin: 3200, tint: -10),
+            .setWhiteBalance(kelvin: 3200, tint: 0),
             .setFocus(lensPosition: vm.lensPosition),
         ])
         XCTAssertEqual(fake.exposureBias, 1.5)
         XCTAssertEqual(fake.whiteBalance?.kelvin, 3200)
-        XCTAssertEqual(fake.whiteBalance?.tint, -10)
     }
 
     /// A failed `configure()` must not go on to push controls at a camera that isn't there.

@@ -70,8 +70,12 @@ struct ViewfinderScreen: View {
             Button("Switch and clear", role: .destructive) { vm.cycleLens() }
             Button("Keep this lens", role: .cancel) {}
         } message: {
-            Text("Near and Far are positions on this lens, so switching clears them and "
-                 + "unlocks exposure. You'll need to set them again.")
+            // Names everything that goes, not just the anchors. Exposure, colour and focus
+            // are all per-device, so a switch discards the neutral measurement too — the
+            // one step here that needs the reel out of the frame to redo. Leaving it out
+            // meant agreeing to lose something the dialog never mentioned.
+            Text("Near, Far, the exposure lock and the neutral measurement all belong to "
+                 + "this lens, so switching clears them. You'll need to set them again.")
         }
         .alert("Error", isPresented: .init(
             get: { vm.errorMessage != nil },
@@ -91,6 +95,11 @@ struct ViewfinderScreen: View {
     /// accounting for letterbox bars.
     private func normalizedPoint(tap: CGPoint, in viewSize: CGSize, imageSize: CGSize) -> CGPoint {
         let fitted = CGRect.aspectFit(imageSize, in: viewSize)
+        // `aspectFit` returns `.zero` for a degenerate image, and dividing by that gives NaN
+        // rather than a crash — which is worse, because NaN would sail through the clamp
+        // (every comparison against it is false) and land in the frame processor's crop
+        // rectangle. Falling back to the centre keeps the loupe pointing somewhere real.
+        guard fitted.width > 0, fitted.height > 0 else { return CGPoint(x: 0.5, y: 0.5) }
         return CGPoint(x: ((tap.x - fitted.minX) / fitted.width).clamped(to: 0...1),
                        y: ((tap.y - fitted.minY) / fitted.height).clamped(to: 0...1))
     }
@@ -109,8 +118,12 @@ struct ViewfinderScreen: View {
             // One button cycling the available back cameras, rather than a chip each.
             Button(vm.currentLensName) {
                 // Only asks when there is something to lose; otherwise switching is free
-                // and a dialog every time would be noise.
-                if vm.nearAnchor != nil || vm.farAnchor != nil || vm.exposureLocked {
+                // and a dialog every time would be noise. A neutral measurement counts as
+                // something to lose in its own right: it is discarded on a switch, and it
+                // is taken before the exposure lock, so gating on the lock alone let the
+                // one step that needs an empty frame be thrown away without a word.
+                if vm.nearAnchor != nil || vm.farAnchor != nil
+                    || vm.exposureLocked || vm.neutralMeasured {
                     confirmLensSwitch = true
                 } else {
                     vm.cycleLens()
@@ -376,6 +389,7 @@ struct LoupeView: View {
 
 struct CaptureProgressView: View {
     @EnvironmentObject var vm: CameraViewModel
+    @State private var confirmCancelStack = false
 
     var body: some View {
         VStack(spacing: 10) {
@@ -397,12 +411,30 @@ struct CaptureProgressView: View {
             default:
                 EmptyView()
             }
+            // Offered during stacking as well as during the bracket. Stacking is the
+            // multi-minute phase, so it is where the urge to escape actually arrives — and
+            // with no button, the only way out was force-quitting the app.
             if case .capturing = vm.phase {
                 Button("Cancel", role: .destructive) { vm.cancelCapture() }
+            } else if vm.isStacking {
+                // Asks first, because this one is not free: the frames are captured and on
+                // disk, and cancelling deletes them. Cancelling a bracket only abandons an
+                // exposure that was still being taken.
+                Button("Cancel", role: .destructive) { confirmCancelStack = true }
             }
         }
         .padding()
         .foregroundStyle(.white)
         .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
+        .confirmationDialog("Discard this capture?",
+                            isPresented: $confirmCancelStack,
+                            titleVisibility: .visible) {
+            Button("Discard", role: .destructive) { vm.cancelCapture() }
+            Button("Keep stacking", role: .cancel) {}
+        } message: {
+            Text("The frames are already captured, but they can't be stacked later — "
+                 + "cancelling deletes them and you'll need to shoot the bracket again. "
+                 + "Your exposure, colour and focus anchors are kept.")
+        }
     }
 }

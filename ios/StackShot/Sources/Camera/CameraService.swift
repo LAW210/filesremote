@@ -230,7 +230,7 @@ final class CameraService: NSObject, CameraControlling {
 
     /// Simulator-only scaffolding: emits the synthetic frame on `videoQueue` at ~15 fps,
     /// through the same `onPreviewFrame` closure the real capture delegate uses, so the
-    /// rest of the pipeline (peaking, zebra, histogram, loupe) can't tell the difference.
+    /// rest of the pipeline (peaking, zebra, loupe) can't tell the difference.
     private func startPreviewTimer() {
         // start() is called both at launch and on every return to .active, and a
         // .active → .inactive → .active trip (Control Center, App Switcher) never
@@ -315,16 +315,12 @@ final class CameraService: NSObject, CameraControlling {
         // for — return immediately as if it had already settled.
         if isPreviewMode { return }
         guard let device else { return }
-        let deadline = Date().addingTimeInterval(timeout)
-        var stableTicks = 0
-        while Date() < deadline {
-            if !device.isAdjustingExposure {
-                stableTicks += 1
-                if stableTicks >= 3 { return }      // ~90 ms of stability
-            } else {
-                stableTicks = 0
-            }
-            try? await Task.sleep(nanoseconds: 30_000_000)
+        // Wrapped rather than passed as `SettleWait.sleepTick`: a function reference does not
+        // carry its default arguments, so that spelling has type `(UInt64) async -> Bool` and
+        // will not satisfy `() async -> Bool`.
+        _ = await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
+                                  tick: { await SettleWait.sleepTick() }) {
+            !device.isAdjustingExposure
         }
     }
 
@@ -419,18 +415,10 @@ final class CameraService: NSObject, CameraControlling {
         // immediate clean settle so callers proceed as they would on a real device.
         if isPreviewMode { return true }
         guard let device else { return false }
-        let deadline = Date().addingTimeInterval(timeout)
-        var stableTicks = 0
-        while Date() < deadline {
-            if abs(device.lensPosition - target) <= tolerance {
-                stableTicks += 1
-                if stableTicks >= 3 { return true }   // ~90 ms of stability
-            } else {
-                stableTicks = 0
-            }
-            try? await Task.sleep(nanoseconds: 30_000_000)
+        return await SettleWait.poll(deadline: Date().addingTimeInterval(timeout),
+                                     tick: { await SettleWait.sleepTick() }) {
+            abs(device.lensPosition - target) <= tolerance
         }
-        return false
     }
 
     // MARK: - Capture
@@ -472,11 +460,11 @@ final class CameraService: NSObject, CameraControlling {
     /// Simulator-only scaffolding: builds one static synthetic frame for preview mode.
     /// Drawn once in `kCVPixelFormatType_32BGRA` — the exact format the real video
     /// output is configured for above — because `PreviewFrameProcessor` reads BGRA
-    /// bytes directly for its histogram; any other format would read as garbage.
+    /// bytes directly; any other format would read as garbage.
     /// The content exercises the overlays the way a real light-boxed subject would:
-    /// a bright near-white background pegs the histogram at the highlight end, a dark
-    /// ringed subject with hard edges gives focus peaking real edges to find, and a
-    /// small pure-white patch gives the zebra overlay a clipped highlight to paint.
+    /// a dark ringed subject with hard edges gives focus peaking real edges to find, and
+    /// a small pure-white patch gives the zebra overlay a clipped highlight to paint,
+    /// against a bright near-white background standing in for the backdrop.
     /// Never called on a device with a camera.
     private static func makeSyntheticPreviewBuffer() -> CVPixelBuffer? {
         let width = 1280
