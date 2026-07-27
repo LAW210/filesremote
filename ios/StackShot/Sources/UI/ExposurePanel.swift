@@ -27,14 +27,25 @@ struct ExposurePanel: View {
 
             // One way to set colour, not three. The preset buttons duplicated what the
             // Kelvin slider already does, for a light box whose source never changes —
-            // and the gray card measures the real thing instead of guessing at a label.
+            // and measuring the real light beats guessing at a label.
+            //
+            // Not "gray card": the measurement makes the scene average neutral, and a
+            // light box's white backdrop is neutral too — white is just bright neutral —
+            // so the empty box works without owning a card. The caption is back because
+            // it now carries something the button can't: what to aim at, and that a
+            // clipped backdrop reads as maximum in all three channels and so measures
+            // nothing. Zebra is how you check that before tapping.
             HStack {
-                Button("Measure off gray card") { vm.lockGrayCardWB() }
+                Button("Measure neutral") { vm.lockGrayCardWB() }
                     .font(.caption2)
                     .buttonStyle(.bordered)
                     .tint(.mint)
                 Spacer()
             }
+
+            Text("Fill the frame with the empty backdrop, or a gray card. Check zebra shows no red first.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
 
             Button(vm.exposureLocked ? "Unlock exposure" : "Lock exposure") {
                 vm.exposureLocked ? vm.unlockExposure() : vm.lockExposure()
