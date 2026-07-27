@@ -7,9 +7,10 @@ import XCTest
 /// This is the region where a mistake loses a finished photo rather than producing a
 /// visibly wrong one — the merged image exists, the frames are already deleted, and there
 /// is no re-stack path — so the assertions here are mostly about what must survive a
-/// partial failure. Everything runs against `FakeStackPersisting`, so no filesystem and no
-/// photo library are involved; the one test that needs `captureStack()`'s error handling
-/// runs a real bracket through `FakeCamera` and cleans up after itself.
+/// partial failure. Everything runs against `FakeStackPersisting` and `FakeBracket`, so no
+/// filesystem and no photo library are involved anywhere in this file — including the tests
+/// that drive `captureStack()`, which used to run a real sweep and delete the StackSet
+/// directories it left in the host's Documents folder afterwards.
 @MainActor
 final class StackFlowTests: XCTestCase {
 
@@ -33,14 +34,21 @@ final class StackFlowTests: XCTestCase {
         return (vm, stacking, camera)
     }
 
+    /// The armed rig's four collaborators, as a named type rather than a four-member tuple:
+    /// SwiftLint errors on those, and an error is what fails the build. Four is also about
+    /// the size at which positional unpacking stops reading clearly anyway.
+    private struct Rig {
+        let vm: CameraViewModel
+        let stacking: FakeStackPersisting
+        let bracket: FakeBracket
+        let camera: FakeCamera
+    }
+
     /// A view model with every collaborator faked and the shutter armed: everything
     /// `captureStack()` needs to run, and no filesystem anywhere. `FakeBracket` stands in for
     /// the sweep, so nothing writes a StackSet directory into the host's Documents folder and
     /// no test has to delete one afterwards.
-    private func makeArmedViewModel() -> (vm: CameraViewModel,
-                                          stacking: FakeStackPersisting,
-                                          bracket: FakeBracket,
-                                          camera: FakeCamera) {
+    private func makeArmedViewModel() -> Rig {
         let camera = FakeCamera()
         let stacking = FakeStackPersisting()
         let bracket = FakeBracket()
@@ -54,7 +62,7 @@ final class StackFlowTests: XCTestCase {
         vm.nearAnchor = 0.2
         vm.farAnchor = 0.8
         vm.stepCount = 3
-        return (vm, stacking, bracket, camera)
+        return Rig(vm: vm, stacking: stacking, bracket: bracket, camera: camera)
     }
 
     /// A StackSet with no files behind it. The fake never reads a frame, so nothing needs
@@ -412,29 +420,20 @@ final class StackFlowTests: XCTestCase {
     ///
     /// `captureStack()`'s catch is what turns a thrown stacking error into a reported message
     /// and a return to `.idle`, so the shutter comes back instead of the UI sitting on a
-    /// progress bar forever. Reaching that catch means running a real bracket, which
-    /// `captureStack()` builds itself against `StackStore.shared` — there is no seam for it.
-    /// The bracket therefore writes a set into the test host's Documents directory, so this
-    /// test records what was there beforehand and removes anything it added.
+    /// progress bar forever.
     ///
     /// The same run covers the previous result being cleared. `lastSet` is the one that
     /// mattered: `mergedFileURL` is derived from it, so a stale `lastSet` left the share and
     /// save actions pointing at the *previous* capture's file while `resultImage` was already
     /// nil — exporting the wrong photo, with nothing on screen to suggest it.
     func testCaptureStackClearsThePreviousResultAndReportsAStackingFailure() async {
-        let (vm, stacking, camera) = makeViewModel()
+        let rig = makeArmedViewModel()
+        let vm = rig.vm, stacking = rig.stacking, bracket = rig.bracket
         vm.autoSaveToPhotos = false
+        bracket.gatesRun = true
+        bracket.progressEvents = [.capturing(frame: 1, of: 3)]
 
-        let preexisting = Set(StackStore().loadAll().map(\.id))
-        addTeardownBlock {
-            let store = StackStore()
-            for set in store.loadAll() where !preexisting.contains(set.id) {
-                store.delete(set)
-            }
-        }
-
-        // A finished capture to be superseded. Nothing here touches the filesystem — the
-        // real bracket only enters below.
+        // A finished capture to be superseded.
         let previous = makeSet()
         do {
             try await vm.stack(set: previous)
@@ -446,12 +445,6 @@ final class StackFlowTests: XCTestCase {
         vm.dismissReview()          // what the UI does as the review sheet goes away
 
         stacking.stackError = StackFlowError(message: "Stacking engine failed: out of memory")
-        camera.lenses = [LensInfo(id: "back.1x", name: "1x")]
-        camera.currentLens = camera.lenses.first
-        vm.exposureLocked = true
-        vm.nearAnchor = 0.2
-        vm.farAnchor = 0.8
-        vm.stepCount = 3
         XCTAssertTrue(vm.canCapture, "premise: the shutter must be armed")
 
         vm.captureStack()
@@ -466,17 +459,17 @@ final class StackFlowTests: XCTestCase {
 
         // The bracket's own progress reaches the phase, which pins `reportBracketPhase`'s
         // applied branch. Deliberately `.capturing` and not `.countdown`: `captureStack()`
-        // now claims `.countdown` synchronously on the way in — to close the double-tap
-        // window — so waiting for that would be waiting for something this test's own call
-        // already did, and would pass with the gate rejecting everything. `.capturing` can
-        // only arrive through the gate. Matched as a pattern rather than compared to a
-        // specific frame, so a fast fake can't race past frame 1 and time this out.
-        await settle("the bracket's own progress to reach the phase", timeout: 20) {
-            if case .capturing = vm.phase { return true }
-            return false
+        // claims `.countdown` synchronously on the way in — to close the double-tap window —
+        // so waiting for that would be waiting for something this test's own call already
+        // did, and would pass with the gate rejecting everything. `.capturing` can only
+        // arrive through the gate. The run is parked until this is observed, so the phase
+        // cannot flash past before the wait sees it.
+        await settle("the bracket's own progress to reach the phase") {
+            vm.phase == .capturing(frame: 1, of: 3)
         }
+        bracket.releaseRun()
 
-        await settle("the stacking failure to be reported", timeout: 30) { vm.errorMessage != nil }
+        await settle("the stacking failure to be reported") { vm.errorMessage != nil }
 
         XCTAssertEqual(vm.errorMessage, "Stacking engine failed: out of memory")
         XCTAssertEqual(vm.phase, .idle, "a failed stack must release the shutter")
@@ -500,75 +493,163 @@ final class StackFlowTests: XCTestCase {
     /// The two calls below have no `await` between them, which is the whole point: they land
     /// in that pre-hop window, exactly as the two taps did.
     func testDoubleTappingTheShutterStartsOnlyOneBracket() async {
-        let (vm, stacking, camera) = makeViewModel()
+        let rig = makeArmedViewModel()
+        let vm = rig.vm, stacking = rig.stacking, bracket = rig.bracket, camera = rig.camera
         vm.autoSaveToPhotos = false
-
-        let preexisting = Set(StackStore().loadAll().map(\.id))
-        addTeardownBlock {
-            let store = StackStore()
-            for set in store.loadAll() where !preexisting.contains(set.id) {
-                store.delete(set)
-            }
-        }
-
-        camera.lenses = [LensInfo(id: "back.1x", name: "1x")]
-        camera.currentLens = camera.lenses.first
-        vm.exposureLocked = true
-        vm.nearAnchor = 0.2
-        vm.farAnchor = 0.8
-        vm.stepCount = 3
+        bracket.gatesRun = true
         XCTAssertTrue(vm.canCapture, "premise: the shutter must be armed")
         XCTAssertEqual(vm.phase, .idle, "premise: the shutter is on screen, so a tap gets through")
 
         vm.captureStack()
         vm.captureStack()
 
-        // A premise, not the assertion under test: the phase is claimed before the first
-        // call returns, which is what leaves the second one nothing to slip through. It
-        // would read the same if the second call had also run, so the counts below are what
-        // actually decide the test.
+        // The observable is how many times the view model asked for a bracket, because that
+        // counts brackets rather than a side effect of brackets — and because
+        // `captureStack()` calls the factory synchronously, before it returns, so this is
+        // decided with nothing awaited and no cross-thread ordering to get wrong. The
+        // previous version of this test counted `capturePhoto` calls on `FakeCamera`, which
+        // could only be read after a real 3-frame sweep had progressed far enough to be
+        // visible; this reads the cause instead of the symptom, and reads it immediately.
+        XCTAssertEqual(bracket.madeCount, 1, "the second tap must not build a second bracket")
+        XCTAssertTrue(bracket.lastCamera === camera, "and the bracket gets the view model's camera")
+
+        // A premise, not the assertion under test: the phase is claimed before the first call
+        // returns, which is what leaves the second one nothing to slip through. It would read
+        // the same if the second call had also run.
         XCTAssertEqual(vm.phase, .countdown(AppConfig.Bracket.startTimerSeconds))
 
-        await settle("the capture to finish", timeout: 40) { vm.phase == .done }
+        bracket.releaseRun()
+        await settle("the capture to finish") { vm.phase == .done }
+        await drainMainActorHops()
 
-        // The observable is `FakeCamera`'s ordered call log, because it counts what reached
-        // the *camera* — the single piece of hardware two brackets would have been
-        // contending over — and nothing can retract an entry once it is in there. The
-        // store-diff below is kept as a second, weaker check: `FocusBracketController`
-        // deletes its own directory whenever a run doesn't complete and only saves its
-        // manifest at the very end, so a second bracket that shot three real frames and
-        // then unwound would leave the store showing exactly one set. That would be a false
-        // pass on its own; the camera log cannot be undone that way.
-        let captures = camera.calls.filter { $0 == .capturePhoto }.count
-        XCTAssertEqual(captures, 3,
-                       "one bracket of 3 frames; 6 capturePhoto calls means a second bracket ran")
-        XCTAssertEqual(camera.calls.filter { $0 == .setFocus(lensPosition: 0.2) }.count, 1,
-                       "and the sweep started once — two brackets both drive the lens to near")
-
-        let created = Set(StackStore().loadAll().map(\.id)).subtracting(preexisting)
-        XCTAssertEqual(created.count, 1, "one capture must leave one StackSet directory, not two")
-
+        XCTAssertEqual(bracket.calls, [.run(near: 0.2, far: 0.8, stepCount: 3)],
+                       "one sweep ran, and no second one behind it")
         XCTAssertEqual(stacking.calls.count, 1, "and only one bracket reached the stacking stage")
         XCTAssertNil(vm.errorMessage)
     }
 
-    // MARK: - Known gap: a late *bracket* tick
+    /// The whole capture, end to end: bracket, then stack, then result — with the plan the
+    /// anchors describe and the exposure the camera was metering at.
+    ///
+    /// The set the bracket produced must be the set that reaches the stacker and lands in
+    /// `lastSet`; the ids are what tie those three together, and nothing else in the suite
+    /// pins that chain, since `stack(set:)` is otherwise called directly by tests.
+    func testCaptureStackRunsTheBracketThenPublishesTheStackedResult() async {
+        let rig = makeArmedViewModel()
+        let vm = rig.vm, stacking = rig.stacking, bracket = rig.bracket, camera = rig.camera
+        vm.autoSaveToPhotos = true
+        vm.kelvin = 4200
+        camera.currentExposure = (iso: 200, shutterSeconds: 1.0 / 125.0)
+        let captured = makeSet()
+        bracket.setToReturn = captured
+        let url = URL(fileURLWithPath: "/tmp/stackshot-fake/\(UUID().uuidString)/stacked.jpg")
+        stacking.mergedFileURLResult = url
 
-    // `reportBracketPhase`'s drop branch — a `.countdown`/`.capturing` tick arriving after
-    // `stack(set:)` has closed the bracket stage — is NOT covered here, and cannot honestly
-    // be with the seams that exist.
-    //
-    // Its applied branch is covered above, by the `.capturing` phase the real bracket
-    // produces. The drop branch needs a tick emitted before the bracket returned but
-    // delivered after `bracketStageOver` was set. That closure is created inside
-    // `captureStack()` and handed to a `FocusBracketController` the view model constructs
-    // itself, so a test cannot hold it and call it late the way
-    // `FakeStackPersisting.progressClosure` allows for the stacking tick. The only other
-    // route is to race a real bracket's final `.capturing` hop against the start of
-    // stacking, which is precisely the ordering nobody controls — a test built on winning
-    // that race would pass or fail for reasons unrelated to the guard. Injecting the bracket
-    // controller (or making the guard internal) is what this would need; a test that cannot
-    // fail is worse than an admitted gap.
+        vm.captureStack()
+        await settle("the capture to finish") { vm.phase == .done }
+
+        XCTAssertEqual(bracket.calls, [.run(near: 0.2, far: 0.8, stepCount: 3)],
+                       "the plan comes from the anchors and the step count")
+        XCTAssertEqual(bracket.lastExposure?.iso, 200, "the metered values ride into the manifest")
+        XCTAssertEqual(bracket.lastExposure?.evBias, vm.evBias)
+        XCTAssertEqual(bracket.lastWhiteBalance?.kelvin, 4200)
+
+        // The bracket's set is the one that was stacked, and the stacker's updated set is the
+        // one that was published.
+        XCTAssertEqual(stacking.calls, [
+            .stackAndPersist(setID: captured.id, outputFormat: vm.outputFormat, deleteFramesAfter: true),
+            .mergedFileURL(setID: captured.id, hasResult: true),
+            .saveFileToPhotos(url)
+        ])
+        XCTAssertEqual(vm.lastSet?.id, captured.id)
+        XCTAssertNotNil(vm.lastSet?.result)
+        XCTAssertTrue(vm.resultImage === stacking.output.merged)
+        XCTAssertTrue(vm.depthMapImage === stacking.output.depthMap)
+        XCTAssertTrue(vm.resultSavedToPhotos)
+        XCTAssertTrue(vm.anchorsFromPreviousCapture)
+        XCTAssertNil(vm.errorMessage)
+    }
+
+    /// A bracket progress tick delivered after stacking has begun must be dropped, not
+    /// applied — the `guard !bracketStageOver` in `reportBracketPhase`.
+    ///
+    /// Ticks are emitted from the bracket's thread and delivered by a `Task { @MainActor }`
+    /// hop, so a tick sent just before the sweep returned can arrive after `stack(set:)` has
+    /// moved the phase to `.stacking(0)`. Applied blindly it reopened a stage that was over:
+    /// the progress bar dropped back to "frame 3 of 3" while the engine was actually
+    /// stacking, and `isStacking` went false, which is what the cancel confirmation reads to
+    /// decide whether a cancel would throw away frames.
+    ///
+    /// The control half comes first deliberately: the same closure through the same fence
+    /// *does* move the phase while the bracket is still the current stage, so when the later
+    /// delivery is dropped, the guard is what dropped it — not a tick that never arrived and
+    /// not a fence too short to see it.
+    func testALateBracketTickIsDroppedRatherThanReopeningTheCaptureStage() async throws {
+        let rig = makeArmedViewModel()
+        let vm = rig.vm, stacking = rig.stacking, bracket = rig.bracket
+        vm.autoSaveToPhotos = false
+        bracket.gatesRun = true
+        stacking.gatesStack = true
+
+        vm.captureStack()
+        await settle("the bracket to start") { bracket.progressClosure != nil }
+        let tick = try XCTUnwrap(bracket.progressClosure)
+
+        // Control: while the bracket is the current stage, a tick applies.
+        tick(.capturing(frame: 1, of: 3))
+        await drainMainActorHops()
+        XCTAssertEqual(vm.phase, .capturing(frame: 1, of: 3),
+                       "premise: this closure and this fence do apply a tick during the sweep")
+
+        // Hand the sweep over to stacking, and park there.
+        bracket.releaseRun()
+        await settle("stacking to begin") { vm.isStacking }
+        XCTAssertEqual(vm.phase, .stacking(0))
+
+        // The late tick: emitted while the bracket was still sweeping, delivered now.
+        tick(.capturing(frame: 3, of: 3))
+        await drainMainActorHops()
+
+        XCTAssertEqual(vm.phase, .stacking(0),
+                       "a bracket tick arriving after stacking began must not reopen the sweep")
+        XCTAssertTrue(vm.isStacking, "and must not tell the cancel prompt the stack isn't running")
+
+        // The same holds once the capture is finished — a `.countdown` landing on `.done`
+        // would put the review sheet back behind a start timer.
+        stacking.releaseStack()
+        await settle("the capture to finish") { vm.phase == .done }
+        tick(.startingTimer(seconds: AppConfig.Bracket.startTimerSeconds))
+        await drainMainActorHops()
+        XCTAssertEqual(vm.phase, .done, "nor may a tick reopen a capture that is over")
+    }
+
+    /// Cancel during the sweep has to reach the bracket itself.
+    ///
+    /// Cancelling the task alone would also unwind the capture, so the end state cannot tell
+    /// the two apart — but only `bracket.cancel()` lets the controller unwind its own device
+    /// configuration and delete its partial directory. The ordered call log is the only place
+    /// that difference is visible, which is why this asserts on it rather than on the phase.
+    func testCancelDuringTheBracketReachesTheBracketItself() async {
+        let rig = makeArmedViewModel()
+        let vm = rig.vm, stacking = rig.stacking, bracket = rig.bracket
+        bracket.gatesRun = true
+
+        vm.captureStack()
+        await settle("the bracket to start") { bracket.progressClosure != nil }
+        XCTAssertEqual(vm.phase, .countdown(AppConfig.Bracket.startTimerSeconds))
+
+        vm.cancelCapture()
+        XCTAssertEqual(bracket.calls, [.run(near: 0.2, far: 0.8, stepCount: 3), .cancel],
+                       "Cancel must reach the sweep that is running, not only its task")
+
+        bracket.releaseRun()
+        await settle("the capture to unwind") { vm.phase == .idle }
+
+        XCTAssertEqual(stacking.calls, [], "a cancelled sweep never reaches the stacker")
+        XCTAssertNil(vm.errorMessage, "a cancel is not a failure to report")
+        XCTAssertNil(vm.resultImage)
+        XCTAssertNil(vm.lastSet)
+    }
 
     // MARK: - Cancellation
 
