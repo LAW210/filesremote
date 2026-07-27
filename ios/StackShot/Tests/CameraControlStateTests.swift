@@ -108,6 +108,48 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
     }
 
+    /// The panel reports whether neutral has been measured, so the owner can tell by
+    /// looking rather than remembering — the order (measure before raising EV) matters and
+    /// getting it wrong fails silently.
+    func testNeutralMeasuredFlagTracksTheMeasurement() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        XCTAssertFalse(vm.neutralMeasured)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertTrue(vm.neutralMeasured)
+    }
+
+    /// A failed measurement must not claim to have happened.
+    func testFailedMeasurementLeavesNeutralUnmeasured() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.fail("lockNeutralWhiteBalance", with: CameraError.configurationFailed)
+
+        vm.lockGrayCardWB()
+
+        XCTAssertFalse(vm.neutralMeasured)
+    }
+
+    /// Switching lenses drops it alongside the measured tint: the measurement belongs to
+    /// the module it was taken on.
+    func testSwitchingLensClearsTheNeutralMeasuredFlag() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        vm.lockGrayCardWB()
+        XCTAssertTrue(vm.neutralMeasured)
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to reach the device") {
+            fake.calls.contains { if case .select = $0 { return true } else { return false } }
+        }
+
+        XCTAssertFalse(vm.neutralMeasured)
+    }
+
     /// The measured green/magenta component is carried forward, not discarded.
     ///
     /// Tint is not a control, but the card measurement finds a real one — a cheap LED

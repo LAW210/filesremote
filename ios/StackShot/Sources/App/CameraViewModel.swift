@@ -147,6 +147,14 @@ final class CameraViewModel: ObservableObject {
     /// `lockGrayCardWB()`.
     private var suppressWhiteBalancePush = false
 
+    /// Whether a neutral measurement has been taken on the current lens.
+    ///
+    /// Surfaced so the exposure panel can say so. Without it there is no way to tell a
+    /// measured white balance from a coincidentally similar Kelvin value, and the one
+    /// question that actually matters mid-setup — "did I already meter the backdrop,
+    /// before I raised EV and put the reel back?" — had no answer anywhere on screen.
+    @Published private(set) var neutralMeasured = false
+
     /// The green/magenta component of the last gray-card measurement, carried forward
     /// into subsequent white-balance writes.
     ///
@@ -296,7 +304,8 @@ final class CameraViewModel: ObservableObject {
             nearAnchor = nil
             farAnchor = nil
             torchEnabled = false        // torch belongs to the previous device
-            measuredTint = 0            // and so does a gray-card measurement
+            measuredTint = 0            // and so does a neutral measurement
+            neutralMeasured = false
             applyExposureBias()         // metering bias is per-device
             pushWhiteBalance()          // and so is white balance
             // The new device defaults to continuous AF. Push the slider's value
@@ -368,6 +377,7 @@ final class CameraViewModel: ObservableObject {
         do {
             let result = try camera.lockNeutralWhiteBalance()
             measuredTint = result.tint
+            neutralMeasured = true
             withWhiteBalancePushSuppressed {
                 kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
             }
