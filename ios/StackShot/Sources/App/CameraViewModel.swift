@@ -530,6 +530,14 @@ final class CameraViewModel: ObservableObject {
 
     func captureStack() {
         guard let near = nearAnchor, let far = farAnchor, canCapture else { return }
+        // Nothing here used to leave `.idle` synchronously: the phase only moved when the
+        // bracket's first progress callback hopped back to the main actor, and the shutter
+        // is on screen for exactly as long as the phase is `.idle`. So a double-tap — one
+        // fat-fingered press — started two brackets against one camera, each writing its own
+        // set, while `bracket` and `captureTask` pointed only at the second. The first was
+        // then unstoppable: Cancel could not reach it. The guard closes the window and the
+        // synchronous phase write below keeps it closed.
+        guard phase == .idle else { return }
         // Clear the previous result here rather than on review dismissal, so the
         // outgoing sheet keeps showing its image until it is actually gone.
         resultImage = nil
@@ -540,6 +548,10 @@ final class CameraViewModel: ObservableObject {
         // file while `resultImage` was nil — exporting the wrong photo, silently.
         lastSet = nil
         bracketStageOver = false
+        // Claimed synchronously, so the shutter is off screen before this method returns
+        // rather than one main-actor hop later. The bracket reports the same phase itself a
+        // moment later, which is a harmless no-op.
+        phase = .countdown(AppConfig.Bracket.startTimerSeconds)
 
         let controller = FocusBracketController(camera: camera)
         bracket = controller

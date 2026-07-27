@@ -78,6 +78,18 @@ final class NativeDepthMapStacker: StackEngine {
             try Task.checkCancellation()
             let buffer = try decodeFrame(at: url)
             defer { free(buffer.data) }
+            // Re-checked, even though pass 1 already validated every frame and both passes
+            // decode the same files deterministically. The composite below indexes this
+            // buffer with `row * buffer.rowBytes + col * 4` where row and col come from
+            // pass 1's dimensions, so if this frame were ever smaller the read would run
+            // off the end of the allocation — an out-of-bounds read, in a loop, over the
+            // user's photo. The check costs two comparisons per frame; being wrong here
+            // costs a crash or silently corrupt pixels.
+            guard Int(buffer.width) == width, Int(buffer.height) == height else {
+                throw StackEngineError.engineFailed(
+                    "frame \(i) changed size between passes (\(buffer.width)x\(buffer.height) "
+                    + "vs \(width)x\(height))")
+            }
             let tag = UInt8(i)
             for p in 0..<count where bestIndex[p] == tag {
                 let row = p / width, col = p % width

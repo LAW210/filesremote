@@ -95,6 +95,11 @@ struct ViewfinderScreen: View {
     /// accounting for letterbox bars.
     private func normalizedPoint(tap: CGPoint, in viewSize: CGSize, imageSize: CGSize) -> CGPoint {
         let fitted = CGRect.aspectFit(imageSize, in: viewSize)
+        // `aspectFit` returns `.zero` for a degenerate image, and dividing by that gives NaN
+        // rather than a crash — which is worse, because NaN would sail through the clamp
+        // (every comparison against it is false) and land in the frame processor's crop
+        // rectangle. Falling back to the centre keeps the loupe pointing somewhere real.
+        guard fitted.width > 0, fitted.height > 0 else { return CGPoint(x: 0.5, y: 0.5) }
         return CGPoint(x: ((tap.x - fitted.minX) / fitted.width).clamped(to: 0...1),
                        y: ((tap.y - fitted.minY) / fitted.height).clamped(to: 0...1))
     }

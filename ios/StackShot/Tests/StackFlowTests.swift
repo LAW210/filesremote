@@ -438,11 +438,16 @@ final class StackFlowTests: XCTestCase {
         XCTAssertNil(vm.depthMapImage)
         XCTAssertFalse(vm.resultSavedToPhotos)
 
-        // The bracket's own progress reaches the phase: `reportBracketPhase` applies a
-        // `.countdown` over `.idle`. The start timer holds this phase for a couple of
-        // seconds, so it is not a race to observe.
-        await settle("the bracket's countdown to reach the phase", timeout: 20) {
-            vm.phase == .countdown(AppConfig.Bracket.startTimerSeconds)
+        // The bracket's own progress reaches the phase, which pins `reportBracketPhase`'s
+        // applied branch. Deliberately `.capturing` and not `.countdown`: `captureStack()`
+        // now claims `.countdown` synchronously on the way in — to close the double-tap
+        // window — so waiting for that would be waiting for something this test's own call
+        // already did, and would pass with the gate rejecting everything. `.capturing` can
+        // only arrive through the gate. Matched as a pattern rather than compared to a
+        // specific frame, so a fast fake can't race past frame 1 and time this out.
+        await settle("the bracket's own progress to reach the phase", timeout: 20) {
+            if case .capturing = vm.phase { return true }
+            return false
         }
 
         await settle("the stacking failure to be reported", timeout: 30) { vm.errorMessage != nil }

@@ -47,13 +47,6 @@ final class StackingService {
         let fileName = outputFormat.mergedFileName
         try data.write(to: directory.appendingPathComponent(fileName), options: .atomic)
 
-        // A re-stack after switching formats would otherwise leave the previous
-        // format's file behind with the manifest pointing at the new one.
-        for other in AppConfig.Stacking.OutputFormat.allCases where other != outputFormat {
-            try? FileManager.default.removeItem(
-                at: directory.appendingPathComponent(other.mergedFileName))
-        }
-
         // Non-fatal, deliberately. The depth map is a diagnostic — every other path
         // treats it as optional — and this write lands after the merged image is already
         // safely on disk but before the manifest records it. A throw here therefore
@@ -80,6 +73,18 @@ final class StackingService {
         // still exist — otherwise the set is stranded: no result to show and no
         // frames to retry from.
         try store.saveManifest(updated)
+
+        // A re-stack after switching formats would otherwise leave the previous format's
+        // file behind with the manifest pointing at the new one. Deliberately after the
+        // manifest write, not before: deleting first meant a failed manifest write left the
+        // manifest naming a file that had just been removed, so the set had no reachable
+        // result even though a good image was sitting next to it. Nothing re-stacks today —
+        // frames are gone after a success — so this is unreachable rather than fixed, but
+        // the ordering rule above is worth holding unconditionally instead of by luck.
+        for other in AppConfig.Stacking.OutputFormat.allCases where other != outputFormat {
+            try? FileManager.default.removeItem(
+                at: directory.appendingPathComponent(other.mergedFileName))
+        }
 
         if deleteFramesAfter {
             for frame in updated.frames {
