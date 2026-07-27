@@ -1,22 +1,28 @@
 # Compile-checks the embedded C++ engine path (ENGINE_EMBEDDED) against the vendored
 # focus-stack + OpenCV sources. Separate from ios-tests.yml so it only runs when the
-# engine, its bridge, or its build inputs actually change — it is the most expensive
-# job in the repo (vendors OpenCV, compiles ~30 C++ translation units) and the engine
-# path changes far less often than the app.
+# app sources, the bridge, or the build inputs actually change — it is the most
+# expensive job in the repo (vendors OpenCV, compiles ~30 C++ translation units), so
+# docs-only and workflow-only commits skip it.
 name: engine build
 
 on:
   push:
     paths:
       - "ios/StackShot/Bridge/**"
-      - "ios/StackShot/Sources/Stacking/**"
+      # The engine target compiles the whole app's Swift sources, not just the
+      # stacking ones, so a change anywhere under Sources/ can break this build.
+      # Narrower filters left the engine check silently stale on push (it is still
+      # caught on pull_request, which diffs the entire branch) and needed a manual
+      # workflow_dispatch to clear. This job is expensive, but "expensive" is a
+      # poor trade against "green because it never ran".
+      - "ios/StackShot/Sources/**"
       - "ios/StackShot/project-engine.yml"
       - "ios/StackShot/scripts/fetch_engine.sh"
       - ".github/workflows/engine-build.yml"
   pull_request:
     paths:
       - "ios/StackShot/Bridge/**"
-      - "ios/StackShot/Sources/Stacking/**"
+      - "ios/StackShot/Sources/**"
       - "ios/StackShot/project-engine.yml"
       - "ios/StackShot/scripts/fetch_engine.sh"
       - ".github/workflows/engine-build.yml"
