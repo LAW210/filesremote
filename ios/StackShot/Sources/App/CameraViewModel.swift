@@ -523,6 +523,10 @@ final class CameraViewModel: ObservableObject {
         resultImage = nil
         depthMapImage = nil
         resultSavedToPhotos = false
+        // Cleared with them, not left behind. `mergedFileURL` is derived from it, so a stale
+        // `lastSet` left the share and save actions pointing at the *previous* capture's
+        // file while `resultImage` was nil — exporting the wrong photo, silently.
+        lastSet = nil
 
         let controller = FocusBracketController(camera: camera)
         bracket = controller
@@ -538,9 +542,9 @@ final class CameraViewModel: ObservableObject {
                 let set = try await controller.run(plan: plan, exposure: exposure, whiteBalance: wb) { p in
                     Task { @MainActor in
                         switch p {
-                        case .startingTimer(let s): self.phase = .countdown(s)
+                        case .startingTimer(let s): self.reportBracketPhase(.countdown(s))
                         case .capturing(let f, let n):
-                            self.phase = .capturing(frame: f, of: n)
+                            guard self.reportBracketPhase(.capturing(frame: f, of: n)) else { return }
                             self.playFrameTick()
                         }
                     }
@@ -575,6 +579,34 @@ final class CameraViewModel: ObservableObject {
         return false
     }
 
+    // Progress is emitted from off the main actor and delivered by a `Task { @MainActor }`
+    // hop per tick. Those hops are unordered with respect to the code that emitted them, so
+    // a tick sent just before a stage ended can be *delivered* after the phase has already
+    // moved on. Applied blindly it reopened a stage that was over: a late `.stacking` tick
+    // landing after `.done` pinned the UI on a progress bar over a finished stack — no
+    // review sheet, cancel armed, indistinguishable from a hang — and a late `.capturing`
+    // tick could overwrite `.stacking(0)` the instant stacking began. Both writes are
+    // therefore gated on the phase they describe still being the current one.
+
+    /// Applies a stacking progress tick, if stacking is still what's happening.
+    private func reportStackProgress(_ progress: Double) {
+        guard isStacking else { return }
+        phase = .stacking(progress)
+    }
+
+    /// Applies a bracket phase, if the bracket hasn't already finished. Returns whether it
+    /// was applied, so a caller doesn't tick the shutter sound for a frame that is history.
+    @discardableResult
+    private func reportBracketPhase(_ newPhase: Phase) -> Bool {
+        switch phase {
+        case .idle, .countdown, .capturing:
+            phase = newPhase
+            return true
+        case .stacking, .done:
+            return false
+        }
+    }
+
     func stack(set: StackSet) async throws {
         phase = .stacking(0)
         let (updated, output): (StackSet, StackOutput)
@@ -583,7 +615,7 @@ final class CameraViewModel: ObservableObject {
                 set,
                 outputFormat: outputFormat,
                 deleteFramesAfter: true) { p in
-                Task { @MainActor in self.phase = .stacking(p) }
+                Task { @MainActor in self.reportStackProgress(p) }
             }
         } catch is CancellationError {
             // The frames are still on disk at this point and nothing can ever stack them:
@@ -602,6 +634,11 @@ final class CameraViewModel: ObservableObject {
             do {
                 try await stacking.saveFileToPhotos(url)
                 resultSavedToPhotos = true
+            } catch is CancellationError {
+                // A cancel that arrives this late is too late to mean anything: the stack is
+                // encoded, on disk and in the manifest. Reporting it raised "The operation
+                // was cancelled" as a failure alert over a capture that had entirely
+                // succeeded — only the Photos copy was skipped.
             } catch {
                 report(error)    // stacking still succeeded; only the Photos add failed
             }
