@@ -187,6 +187,52 @@ final class StackingPipelineTests: XCTestCase {
         }
     }
 
+    /// The depth map is a diagnostic side-file, so a stack that actually succeeded must not
+    /// be reported as a failure just because that file could not be written. Turn the
+    /// `try?` in `stackAndPersist` back into a `try` and this throws instead: the merged
+    /// image is already encoded and on disk at that point, the manifest has not recorded it
+    /// yet, and there is no re-stack path — so the owner waits minutes, gets an error, and
+    /// the finished photo is unreachable. Disk-full hits this line first in practice, since
+    /// the depth PNG is the largest thing written after the merged image.
+    ///
+    /// The failure is induced exactly the way `testManifestIsSavedBeforeFramesAreDeleted`
+    /// induces its own: a non-empty *directory* planted at the path the file has to occupy,
+    /// which no atomic file write can replace. The premise is asserted first, so if that
+    /// trick ever stops throwing this test fails loudly instead of passing vacuously.
+    func testAFailedDepthMapWriteStillProducesASuccessfulStack() async throws {
+        let set = try makeSetOnDisk(frameCount: 2)
+        let directory = store.directory(for: set)
+        let depthMapPath = directory
+            .appendingPathComponent(AppConfig.Stacking.depthMapFileName)
+        try FileManager.default.createDirectory(at: depthMapPath, withIntermediateDirectories: true)
+        try Data([0x00]).write(to: depthMapPath.appendingPathComponent("blocker"))
+
+        XCTAssertThrowsError(try Data([0x00]).write(to: depthMapPath, options: .atomic),
+                             "premise: the planted directory must make the depth-map write throw")
+
+        let service = StackingService(store: store)
+        let run = try await service.stackAndPersist(set, outputFormat: .jpeg, deleteFramesAfter: true)
+
+        // The stack succeeded in every way that matters: a merged image came back, the
+        // encoded file is on disk, and the manifest records it.
+        XCTAssertNotNil(run.output.merged.cgImage)
+        XCTAssertEqual(run.set.result?.mergedFileName, "stacked.jpg")
+        XCTAssertTrue(exists(directory.appendingPathComponent("stacked.jpg")))
+        let persisted = try XCTUnwrap(store.loadAll().first { $0.id == set.id })
+        XCTAssertNotNil(persisted.result)
+
+        // The engine did produce a depth map — this is about the write failing, not about
+        // an engine that returned nothing to write.
+        XCTAssertNotNil(run.output.depthMap)
+        // Only the diagnostic is missing, and nothing claims otherwise: no file name in
+        // the manifest, and no image offered to the review UI.
+        XCTAssertNil(run.set.result?.depthMapFileName)
+        XCTAssertNil(persisted.result?.depthMapFileName)
+        XCTAssertNil(service.depthMapImage(for: run.set))
+        let lines = try logLines(for: run.set)
+        XCTAssertTrue(lines.contains { $0.contains("depthMap=no") })
+    }
+
     /// The frames are gone, but the manifest still describes them — that record is what
     /// the library UI renders and what a future re-stack would have to be told about.
     func testDeleteFramesAfterRemovesFramesButKeepsTheManifestRecord() async throws {
