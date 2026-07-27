@@ -108,6 +108,44 @@ final class CameraControlStateTests: XCTestCase {
         XCTAssertEqual(fake.calls, [.lockNeutralWhiteBalance])
     }
 
+    /// The measured green/magenta component is carried forward, not discarded.
+    ///
+    /// Tint is not a control, but the card measurement finds a real one — a cheap LED
+    /// panel commonly has a green spike that Kelvin cannot correct at any setting. If the
+    /// measurement were dropped, nudging Kelvin after measuring would silently reset that
+    /// axis to neutral and put the cast back.
+    func testKelvinChangeAfterAGrayCardLockKeepsTheMeasuredTint() {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        fake.neutralWhiteBalanceResult = (kelvin: 4800, tint: 9)
+        vm.lockGrayCardWB()
+        fake.reset()
+
+        vm.kelvin = 5200
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 5200, tint: 9)])
+    }
+
+    /// A measurement belongs to the module it was taken on, so switching lenses drops it
+    /// rather than applying one camera's cast to another's.
+    func testSwitchingLensClearsTheMeasuredTint() async {
+        let fake = FakeCamera()
+        let vm = makeViewModel(fake)
+        vm.lenses = threeLenses()
+        vm.selectedLensID = "wide"
+        fake.neutralWhiteBalanceResult = (kelvin: 4800, tint: 9)
+        vm.lockGrayCardWB()
+
+        vm.cycleLens()
+        await waitUntil("the lens switch to reach the device") {
+            fake.calls.contains { if case .select = $0 { return true } else { return false } }
+        }
+        fake.reset()
+        vm.kelvin = 5000
+
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 5000, tint: 0)])
+    }
+
     /// The suppression must be released, not just applied.
     ///
     /// `withWhiteBalancePushSuppressed` relies on a `defer` to clear the flag. Delete that
@@ -124,7 +162,7 @@ final class CameraControlStateTests: XCTestCase {
 
         vm.kelvin = 4200
 
-        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4200, tint: 0)])
+        XCTAssertEqual(fake.calls, [.setWhiteBalance(kelvin: 4200, tint: 3)])
     }
 
     /// And released even when the measurement fails, since the flag is set around the

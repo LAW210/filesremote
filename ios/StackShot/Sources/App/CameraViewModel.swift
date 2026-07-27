@@ -147,6 +147,17 @@ final class CameraViewModel: ObservableObject {
     /// `lockGrayCardWB()`.
     private var suppressWhiteBalancePush = false
 
+    /// The green/magenta component of the last gray-card measurement, carried forward
+    /// into subsequent white-balance writes.
+    ///
+    /// Tint is not a control — a fixed light box does not drift on that axis, and asking
+    /// anyone to judge green versus magenta by eye is worse than measuring it. But the
+    /// measurement genuinely finds one: cheap LED panels commonly have a green spike, and
+    /// Kelvin cannot correct for it at any setting. Keeping the measured value here means
+    /// nudging Kelvin afterwards re-derives gains that still include the cast the card
+    /// found, instead of quietly resetting that axis to neutral.
+    private var measuredTint: Float = 0
+
     /// Label for the lens button — the lens currently attached.
     var currentLensName: String {
         lenses.first { $0.id == selectedLensID }?.name ?? "—"
@@ -285,6 +296,7 @@ final class CameraViewModel: ObservableObject {
             nearAnchor = nil
             farAnchor = nil
             torchEnabled = false        // torch belongs to the previous device
+            measuredTint = 0            // and so does a gray-card measurement
             applyExposureBias()         // metering bias is per-device
             pushWhiteBalance()          // and so is white balance
             // The new device defaults to continuous AF. Push the slider's value
@@ -311,10 +323,7 @@ final class CameraViewModel: ObservableObject {
     /// always the value shown in the panel.
     private func pushWhiteBalance() {
         guard !suppressWhiteBalancePush else { return }
-        // Tint is neutral: AVFoundation's temperature-and-tint pair requires a value,
-        // but green/magenta correction was removed as a control — a fixed light box does
-        // not drift on that axis, and the gray card measures any real cast directly.
-        try? camera.setWhiteBalance(kelvin: kelvin, tint: 0)
+        try? camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
     }
 
     /// Freezes metering and white balance so every frame in the bracket matches.
@@ -337,7 +346,7 @@ final class CameraViewModel: ObservableObject {
     private func freezeExposureAndWhiteBalance() async throws {
         await camera.waitForExposureSettle()
         lockedExposure = try camera.lockExposure()
-        try camera.setWhiteBalance(kelvin: kelvin, tint: 0)
+        try camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
     }
 
     /// Returns to live metering so the EV slider takes effect again.
@@ -358,6 +367,7 @@ final class CameraViewModel: ObservableObject {
     func lockGrayCardWB() {
         do {
             let result = try camera.lockNeutralWhiteBalance()
+            measuredTint = result.tint
             withWhiteBalancePushSuppressed {
                 kelvin = result.kelvin.clamped(to: AppConfig.Exposure.kelvinRange)
             }
@@ -476,7 +486,7 @@ final class CameraViewModel: ObservableObject {
         let exposure = StackSet.Exposure(iso: settled.iso,
                                          shutterSeconds: settled.shutterSeconds,
                                          evBias: evBias)
-        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: 0)
+        let wb = StackSet.WhiteBalance(kelvin: kelvin, tint: measuredTint)
 
         Task {
             do {
@@ -632,7 +642,7 @@ final class CameraViewModel: ObservableObject {
                 // Colour is a manual setting either way, so it has to be restored even
                 // when exposure is live — otherwise a background trip silently reverts
                 // the light box's white balance to whatever the device decides.
-                try camera.setWhiteBalance(kelvin: kelvin, tint: 0)
+                try camera.setWhiteBalance(kelvin: kelvin, tint: measuredTint)
             }
             try camera.setFocus(lensPosition: lensPosition)
         } catch {
