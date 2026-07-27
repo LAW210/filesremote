@@ -461,22 +461,88 @@ final class StackFlowTests: XCTestCase {
         XCTAssertEqual(stacking.calls.count, 2, "the first stack, then the failed one — nothing else")
     }
 
+    /// A double-tap on the shutter must start exactly one bracket.
+    ///
+    /// `captureStack()` used to change nothing synchronously: the phase only left `.idle`
+    /// when the bracket's first progress callback hopped back to the main actor, and the
+    /// shutter is rendered for exactly as long as the phase is `.idle` with `canCapture`
+    /// true. One fat-fingered press therefore ran the method twice inside that window and
+    /// started two `FocusBracketController`s against one camera, each writing its own set,
+    /// while `bracket` and `captureTask` pointed only at the second — leaving the first
+    /// unstoppable, because `cancelCapture()` could not reach it.
+    ///
+    /// The two calls below have no `await` between them, which is the whole point: they land
+    /// in that pre-hop window, exactly as the two taps did.
+    func testDoubleTappingTheShutterStartsOnlyOneBracket() async {
+        let (vm, stacking, camera) = makeViewModel()
+        vm.autoSaveToPhotos = false
+
+        let preexisting = Set(StackStore().loadAll().map(\.id))
+        addTeardownBlock {
+            let store = StackStore()
+            for set in store.loadAll() where !preexisting.contains(set.id) {
+                store.delete(set)
+            }
+        }
+
+        camera.lenses = [LensInfo(id: "back.1x", name: "1x")]
+        camera.currentLens = camera.lenses.first
+        vm.exposureLocked = true
+        vm.nearAnchor = 0.2
+        vm.farAnchor = 0.8
+        vm.stepCount = 3
+        XCTAssertTrue(vm.canCapture, "premise: the shutter must be armed")
+        XCTAssertEqual(vm.phase, .idle, "premise: the shutter is on screen, so a tap gets through")
+
+        vm.captureStack()
+        vm.captureStack()
+
+        // A premise, not the assertion under test: the phase is claimed before the first
+        // call returns, which is what leaves the second one nothing to slip through. It
+        // would read the same if the second call had also run, so the counts below are what
+        // actually decide the test.
+        XCTAssertEqual(vm.phase, .countdown(AppConfig.Bracket.startTimerSeconds))
+
+        await settle("the capture to finish", timeout: 40) { vm.phase == .done }
+
+        // The observable is `FakeCamera`'s ordered call log, because it counts what reached
+        // the *camera* — the single piece of hardware two brackets would have been
+        // contending over — and nothing can retract an entry once it is in there. The
+        // store-diff below is kept as a second, weaker check: `FocusBracketController`
+        // deletes its own directory whenever a run doesn't complete and only saves its
+        // manifest at the very end, so a second bracket that shot three real frames and
+        // then unwound would leave the store showing exactly one set. That would be a false
+        // pass on its own; the camera log cannot be undone that way.
+        let captures = camera.calls.filter { $0 == .capturePhoto }.count
+        XCTAssertEqual(captures, 3,
+                       "one bracket of 3 frames; 6 capturePhoto calls means a second bracket ran")
+        XCTAssertEqual(camera.calls.filter { $0 == .setFocus(lensPosition: 0.2) }.count, 1,
+                       "and the sweep started once — two brackets both drive the lens to near")
+
+        let created = Set(StackStore().loadAll().map(\.id)).subtracting(preexisting)
+        XCTAssertEqual(created.count, 1, "one capture must leave one StackSet directory, not two")
+
+        XCTAssertEqual(stacking.calls.count, 1, "and only one bracket reached the stacking stage")
+        XCTAssertNil(vm.errorMessage)
+    }
+
     // MARK: - Known gap: a late *bracket* tick
 
-    // `reportBracketPhase`'s drop branch — a `.countdown`/`.capturing` tick delivered once
-    // the phase has already reached `.stacking` or `.done` — is NOT covered here, and cannot
-    // honestly be with the seams that exist.
+    // `reportBracketPhase`'s drop branch — a `.countdown`/`.capturing` tick arriving after
+    // `stack(set:)` has closed the bracket stage — is NOT covered here, and cannot honestly
+    // be with the seams that exist.
     //
-    // Its applied branch is covered above, through the real bracket's countdown. The drop
-    // branch needs the opposite: a tick emitted before the bracket returned but delivered
-    // after `stack(set:)` set `.stacking(0)`. That closure is created inside `captureStack()`
-    // and handed to a `FocusBracketController` the view model constructs itself, so a test
-    // cannot hold it and call it late the way `FakeStackPersisting.progressClosure` allows
-    // for the stacking tick. The only other route is to race a real bracket's final
-    // `.capturing` hop against the start of stacking, which is precisely the ordering nobody
-    // controls — a test built on winning that race would pass or fail for reasons unrelated
-    // to the guard. Injecting the bracket controller (or making the guard internal) is what
-    // this would need; a test that cannot fail is worse than an admitted gap.
+    // Its applied branch is covered above, by the `.capturing` phase the real bracket
+    // produces. The drop branch needs a tick emitted before the bracket returned but
+    // delivered after `bracketStageOver` was set. That closure is created inside
+    // `captureStack()` and handed to a `FocusBracketController` the view model constructs
+    // itself, so a test cannot hold it and call it late the way
+    // `FakeStackPersisting.progressClosure` allows for the stacking tick. The only other
+    // route is to race a real bracket's final `.capturing` hop against the start of
+    // stacking, which is precisely the ordering nobody controls — a test built on winning
+    // that race would pass or fail for reasons unrelated to the guard. Injecting the bracket
+    // controller (or making the guard internal) is what this would need; a test that cannot
+    // fail is worse than an admitted gap.
 
     // MARK: - Cancellation
 
